@@ -595,18 +595,28 @@ async function parseResumeText() {
 
   try {
     console.log('[AI解析] 开始解析，文本长度:', resumeText.length);
+    console.log('[AI解析] 使用提供商:', settings.aiProvider);
 
     // 直接调用AI解析
     const parsedData = await resumeParser.parseWithAI(resumeText, settings);
 
-    console.log('[AI解析] 解析成功:', parsedData);
+    console.log('[AI解析] AI返回数据:', parsedData);
+
+    if (!parsedData) {
+      throw new Error('AI未返回数据');
+    }
 
     // 填充解析结果
+    console.log('[AI解析] 开始填充数据到表单...');
     await fillParsedData(parsedData);
 
+    console.log('[AI解析] 填充完成，准备保存...');
+    console.log('[AI解析] 保存前currentProfile:', currentProfile);
+
     // 自动保存
-    console.log('[AI解析] 开始自动保存...');
     await saveProfile();
+
+    console.log('[AI解析] 保存完成');
 
     showToast('✅ AI解析成功！数据已自动保存', 'success');
 
@@ -615,6 +625,7 @@ async function parseResumeText() {
 
   } catch (error) {
     console.error('[AI解析] 失败:', error);
+    console.error('[AI解析] 错误堆栈:', error.stack);
     showToast(`❌ 解析失败: ${error.message}`, 'error');
   } finally {
     btn.disabled = false;
@@ -643,158 +654,194 @@ async function parseResume() {
 // 填充AI解析的数据
 async function fillParsedData(data) {
   console.log('[AI解析] 开始填充数据:', data);
+  console.log('[AI解析] currentProfile:', currentProfile);
+
+  if (!data || typeof data !== 'object') {
+    console.error('[AI解析] 数据格式错误:', data);
+    throw new Error('AI返回的数据格式不正确');
+  }
 
   // 填充基础信息到currentProfile
   if (data.basicInfo) {
+    console.log('[AI解析] 填充基础信息');
     const bi = data.basicInfo;
+
+    // 逐个字段填充并打印日志
     if (bi.fullName) {
-      document.getElementById('fullName').value = bi.fullName;
-      currentProfile.basicInfo.fullName = bi.fullName;
+      console.log('[AI解析] 姓名:', bi.fullName);
+      const elem = document.getElementById('fullName');
+      if (elem) {
+        elem.value = bi.fullName;
+        currentProfile.basicInfo.fullName = bi.fullName;
+      } else {
+        console.error('[AI解析] 找不到fullName元素');
+      }
     }
+
     if (bi.firstName) {
+      console.log('[AI解析] 名:', bi.firstName);
       document.getElementById('firstName').value = bi.firstName;
       currentProfile.basicInfo.firstName = bi.firstName;
     }
+
     if (bi.lastName) {
+      console.log('[AI解析] 姓:', bi.lastName);
       document.getElementById('lastName').value = bi.lastName;
       currentProfile.basicInfo.lastName = bi.lastName;
     }
+
     if (bi.phone) {
+      console.log('[AI解析] 手机:', bi.phone);
       document.getElementById('phone').value = bi.phone;
       currentProfile.basicInfo.phone = bi.phone;
     }
+
     if (bi.email) {
+      console.log('[AI解析] 邮箱:', bi.email);
       document.getElementById('email').value = bi.email;
       currentProfile.basicInfo.email = bi.email;
     }
+
     if (bi.gender) {
       document.getElementById('gender').value = bi.gender;
       currentProfile.basicInfo.gender = bi.gender;
     }
+
     if (bi.birthDate) {
       document.getElementById('birthDate').value = bi.birthDate;
       currentProfile.basicInfo.birthDate = bi.birthDate;
     }
+
     if (bi.city) {
       document.getElementById('city').value = bi.city;
       currentProfile.basicInfo.city = bi.city;
     }
+
     if (bi.state) {
       document.getElementById('state').value = bi.state;
       currentProfile.basicInfo.state = bi.state;
     }
+
     if (bi.linkedin) {
       document.getElementById('linkedin').value = bi.linkedin;
       currentProfile.basicInfo.linkedin = bi.linkedin;
     }
+
     if (bi.github) {
       document.getElementById('github').value = bi.github;
       currentProfile.basicInfo.github = bi.github;
     }
+
     if (bi.website) {
       document.getElementById('website').value = bi.website;
       currentProfile.basicInfo.website = bi.website;
     }
+
+    console.log('[AI解析] 基础信息填充完成');
   }
 
   // 填充教育经历
   if (data.education && data.education.length > 0) {
-    // 清空现有教育经历，重新添加
+    console.log('[AI解析] 填充教育经历，数量:', data.education.length);
     const validEducation = data.education.filter(edu => edu.school || edu.major);
 
     if (validEducation.length > 0) {
-      console.log('[AI解析] 添加', validEducation.length, '条教育经历');
+      console.log('[AI解析] 有效教育经历:', validEducation.length);
 
-      // 使用第一条已有的，其余添加新的
+      // 清空现有的，从第一个开始
+      // 如果已有教育经历，使用第一个，否则添加
       for (let i = 0; i < validEducation.length; i++) {
-        if (i > 0) {
-          // 添加新的教育经历
+        if (i >= currentProfile.education.length) {
+          console.log('[AI解析] 添加新教育经历', i + 1);
           await chrome.runtime.sendMessage({ action: 'addEducation', profileId: activeProfileId });
           await new Promise(resolve => setTimeout(resolve, 100));
+          await loadProfiles(); // 重新加载获取新添加的
         }
       }
 
-      // 重新加载以获取最新数据
-      await loadProfiles();
-
-      // 更新currentProfile的教育数据
+      // 填充数据
       validEducation.forEach((edu, index) => {
         if (currentProfile.education[index]) {
+          console.log('[AI解析] 填充教育', index + 1, ':', edu.school, edu.major);
           Object.assign(currentProfile.education[index], edu);
         }
       });
 
       // 重新渲染
+      console.log('[AI解析] 重新渲染教育列表');
       renderEducationList(currentProfile.education);
     }
   }
 
   // 填充工作经历
   if (data.workExperience && data.workExperience.length > 0) {
+    console.log('[AI解析] 填充工作经历，数量:', data.workExperience.length);
     const validWork = data.workExperience.filter(work => work.company || work.position);
 
     if (validWork.length > 0) {
-      console.log('[AI解析] 添加', validWork.length, '条工作经历');
-
       for (let i = 0; i < validWork.length; i++) {
-        if (i > 0) {
+        if (i >= currentProfile.workExperience.length) {
+          console.log('[AI解析] 添加新工作经历', i + 1);
           await chrome.runtime.sendMessage({ action: 'addWorkExperience', profileId: activeProfileId });
           await new Promise(resolve => setTimeout(resolve, 100));
+          await loadProfiles();
         }
       }
 
-      await loadProfiles();
-
       validWork.forEach((work, index) => {
         if (currentProfile.workExperience[index]) {
+          console.log('[AI解析] 填充工作', index + 1, ':', work.company, work.position);
           Object.assign(currentProfile.workExperience[index], work);
         }
       });
 
+      console.log('[AI解析] 重新渲染工作列表');
       renderWorkList(currentProfile.workExperience);
     }
   }
 
   // 填充项目经历
   if (data.projects && data.projects.length > 0) {
+    console.log('[AI解析] 填充项目经历，数量:', data.projects.length);
     const validProjects = data.projects.filter(proj => proj.name);
 
     if (validProjects.length > 0) {
-      console.log('[AI解析] 添加', validProjects.length, '条项目经历');
-
       for (let i = 0; i < validProjects.length; i++) {
-        if (i > 0) {
+        if (i >= currentProfile.projects.length) {
+          console.log('[AI解析] 添加新项目', i + 1);
           await chrome.runtime.sendMessage({ action: 'addProject', profileId: activeProfileId });
           await new Promise(resolve => setTimeout(resolve, 100));
+          await loadProfiles();
         }
       }
 
-      await loadProfiles();
-
       validProjects.forEach((proj, index) => {
         if (currentProfile.projects[index]) {
+          console.log('[AI解析] 填充项目', index + 1, ':', proj.name);
           Object.assign(currentProfile.projects[index], proj);
         }
       });
 
+      console.log('[AI解析] 重新渲染项目列表');
       renderProjectList(currentProfile.projects);
     }
   }
 
   // 填充技能
   if (data.skills && data.skills.length > 0) {
-    console.log('[AI解析] 添加', data.skills.length, '个技能');
+    console.log('[AI解析] 填充技能，数量:', data.skills.length);
     currentProfile.skills = data.skills;
     renderSkillsList(currentProfile.skills);
   }
 
   // 填充自我介绍
   if (data.introduction) {
+    console.log('[AI解析] 填充自我介绍');
     document.getElementById('introduction').value = data.introduction;
     currentProfile.introTemplates.default = data.introduction;
   }
 
-  console.log('[AI解析] 数据填充完成');
+  console.log('[AI解析] 数据填充完成，currentProfile:', currentProfile);
 }
 
 async function deleteCurrentProfile() {
