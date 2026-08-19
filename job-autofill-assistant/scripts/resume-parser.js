@@ -70,43 +70,30 @@ class ResumeParser {
 
   // 构建提示词
   buildPrompt(resumeText) {
-    return `你是一位专业的简历信息提取专家，擅长从各种格式的简历中提取结构化信息。
+    return `你是一位专业的简历信息提取专家。
 
-【你的专业能力】
-- 能够理解多种简历格式：纯文本、Markdown、LaTeX、HTML、表格等
-- 能够识别中英文简历
-- 能够处理不规范的格式
-- 能够推断缺失的信息
-
-【输入说明】
-用户可能提供以下格式的简历：
-1. 纯文本简历（从PDF/Word复制）
-2. Markdown格式简历
-3. LaTeX源码简历（\\documentclass、\\begin{document}等）
-4. HTML格式简历
-5. 表格格式数据
-6. 混合格式
+【重要】你必须严格按照JSON格式返回，不要添加任何解释文字！
 
 【任务】
-从以下简历内容中提取结构化信息，并以JSON格式返回。
+从以下简历内容中提取结构化信息。
 
 【简历内容】
 ${resumeText}
 
-【输出要求】
-请严格按照以下JSON格式输出（不要包含任何其他文字，只返回JSON）：
+【输出格式】
+请直接返回以下JSON格式（不要包含markdown代码块标记，不要添加任何说明文字）：
 
 {
   "basicInfo": {
     "fullName": "完整姓名",
     "firstName": "名",
     "lastName": "姓",
-    "phone": "手机号（统一格式，如：13800138000）",
+    "phone": "手机号（只保留数字，如13800138000）",
     "email": "邮箱",
-    "gender": "性别（男/女，如果无法判断则留空）",
-    "birthDate": "出生日期（YYYY-MM-DD格式）",
+    "gender": "性别（男/女，不确定留空）",
+    "birthDate": "出生日期（YYYY-MM-DD）",
     "city": "城市",
-    "state": "省份/州",
+    "state": "省份",
     "linkedin": "LinkedIn链接",
     "github": "GitHub链接",
     "website": "个人网站"
@@ -115,66 +102,43 @@ ${resumeText}
     {
       "school": "学校名称",
       "major": "专业",
-      "degree": "学历（本科/硕士/博士/大专）",
-      "startDate": "开始时间（YYYY-MM格式）",
-      "endDate": "结束时间（YYYY-MM格式，在读则填'至今'）",
-      "gpa": "GPA（如3.8/4.0）"
+      "degree": "学历（本科/硕士/博士）",
+      "startDate": "YYYY-MM",
+      "endDate": "YYYY-MM或至今",
+      "gpa": "GPA"
     }
   ],
   "workExperience": [
     {
       "company": "公司名称",
       "position": "职位",
-      "startDate": "开始时间（YYYY-MM格式）",
-      "endDate": "结束时间（YYYY-MM格式，在职则填'至今'）",
-      "description": "工作描述（简短总结，2-3句话）"
+      "startDate": "YYYY-MM",
+      "endDate": "YYYY-MM或至今",
+      "description": "工作描述（简短总结）"
     }
   ],
   "projects": [
     {
       "name": "项目名称",
-      "role": "担任角色",
-      "description": "项目描述（简短总结）",
-      "technologies": ["技术1", "技术2", "技术3"]
+      "role": "角色",
+      "description": "项目描述",
+      "technologies": ["技术1", "技术2"]
     }
   ],
-  "skills": ["技能1", "技能2", "技能3", "技能4", "技能5"]
+  "skills": ["技能1", "技能2", "技能3"]
 }
 
-【特殊处理规则】
-1. LaTeX格式：
-   - 忽略\\documentclass、\\usepackage等命令
-   - 从\\section、\\subsection提取章节标题
-   - 从内容提取实际信息
-   - \\textbf{}中通常是标题或重点
-   - \\href{}中是链接
+【处理规则】
+1. 电话号码：(+86) 138-1234-5678 → 13812345678
+2. 日期：2023.09 - 2026.06 → startDate: "2023-09", endDate: "2026-06"
+3. 学历：硕士/Master/研究生 → "硕士"，本科/Bachelor/学士 → "本科"
+4. 如果字段没有信息，使用空字符串""
+5. 数组字段至少包含一个对象
 
-2. 日期格式：
-   - "2019.09 - 2023.06" → startDate: "2019-09", endDate: "2023-06"
-   - "2019年9月 - 2023年6月" → 同上
-   - "2019/09 - 至今" → startDate: "2019-09", endDate: "至今"
+【再次强调】
+只返回上面的JSON格式，不要添加任何其他文字！不要用markdown代码块包裹！直接返回纯JSON！
 
-3. 学历映射：
-   - Bachelor/本科/学士 → "本科"
-   - Master/硕士/研究生 → "硕士"
-   - PhD/Doctor/博士 → "博士"
-   - College/大专/专科 → "大专"
-
-4. 技能提取：
-   - 编程语言、框架、工具都算技能
-   - 去重，只保留独特的技能
-
-5. 信息推断：
-   - 如果无法确定某个字段，使用空字符串""
-   - 数组至少包含一个对象（即使是空对象）
-   - 电话号码统一去除空格和连字符
-
-【重要】
-- 只返回JSON，不要包含任何解释性文字
-- 确保JSON格式正确，可以被解析
-- 所有字段都要存在，即使值为空
-
-现在开始提取，直接返回JSON：`;
+现在开始提取：`;
   }
 
   // 调用DeepSeek API
@@ -433,29 +397,56 @@ ${resumeText}
 
   // 解析AI返回的JSON
   parseAIResponse(content) {
+    console.log('[简历解析] 开始解析AI响应');
+    console.log('[简历解析] 原始内容长度:', content.length);
+    console.log('[简历解析] 原始内容前200字符:', content.substring(0, 200));
+
     try {
       // 移除可能的markdown代码块标记
       let jsonStr = content.trim();
+
       if (jsonStr.startsWith('```json')) {
+        console.log('[简历解析] 发现```json标记，移除');
         jsonStr = jsonStr.substring(7);
       } else if (jsonStr.startsWith('```')) {
+        console.log('[简历解析] 发现```标记，移除');
         jsonStr = jsonStr.substring(3);
       }
+
       if (jsonStr.endsWith('```')) {
+        console.log('[简历解析] 发现结尾```标记，移除');
         jsonStr = jsonStr.substring(0, jsonStr.length - 3);
       }
 
       jsonStr = jsonStr.trim();
 
+      console.log('[简历解析] 清理后内容前200字符:', jsonStr.substring(0, 200));
+
+      // 尝试查找JSON对象
+      const jsonStart = jsonStr.indexOf('{');
+      const jsonEnd = jsonStr.lastIndexOf('}');
+
+      if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+        jsonStr = jsonStr.substring(jsonStart, jsonEnd + 1);
+        console.log('[简历解析] 提取JSON对象，长度:', jsonStr.length);
+      }
+
       // 解析JSON
+      console.log('[简历解析] 尝试解析JSON...');
       const parsed = JSON.parse(jsonStr);
+      console.log('[简历解析] JSON解析成功！');
 
       // 验证和清理数据
-      return this.validateAndCleanData(parsed);
+      const cleaned = this.validateAndCleanData(parsed);
+      console.log('[简历解析] 数据验证完成');
+      return cleaned;
+
     } catch (error) {
-      console.error('[简历解析] JSON解析失败:', error);
-      console.error('[简历解析] 原始内容:', content);
-      throw new Error('AI返回的数据格式不正确，请重试');
+      console.error('[简历解析] JSON解析失败!');
+      console.error('[简历解析] 错误:', error.message);
+      console.error('[简历解析] AI完整响应:', content);
+
+      throw new Error(`AI返回格式错误：${error.message}\n\n请查看控制台了解详情，或尝试：\n1. 简化简历内容\n2. 重新测试连接\n3. 切换其他AI提供商`);
     }
   }
 
