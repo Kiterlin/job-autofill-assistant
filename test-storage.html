@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>存储功能测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #667eea;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      border-radius: 6px;
+      background: #667eea;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    .result {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .success {
+      color: green;
+      font-weight: bold;
+    }
+    .error {
+      color: red;
+      font-weight: bold;
+    }
+    .info {
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 存储功能测试页面</h1>
+  <p class="info">此页面用于测试 chrome.storage.local 的功能。请在加载扩展后打开此页面。</p>
+
+  <div class="test-section">
+    <h2>1. 初始化测试</h2>
+    <button onclick="testInitialize()">初始化存储</button>
+    <div id="init-result" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>2. 保存和加载测试</h2>
+    <button onclick="testSave()">保存测试数据</button>
+    <button onclick="testLoad()">加载数据</button>
+    <div id="save-result" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>3. 资料管理测试</h2>
+    <button onclick="testAddProfile()">添加新资料</button>
+    <button onclick="testSwitchProfile()">切换资料</button>
+    <button onclick="testDeleteProfile()">删除资料</button>
+    <div id="profile-result" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>4. 容量测试</h2>
+    <button onclick="testStorageInfo()">查看存储使用</button>
+    <button onclick="testLargeData()">测试大数据保存</button>
+    <div id="capacity-result" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>5. 错误处理测试</h2>
+    <button onclick="testInvalidData()">测试无效数据</button>
+    <button onclick="testOversize()">测试超大数据</button>
+    <div id="error-result" class="result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>6. 导入导出测试</h2>
+    <button onclick="testExport()">导出数据</button>
+    <button onclick="testImport()">导入数据</button>
+    <div id="export-result" class="result"></div>
+  </div>
+
+  <script>
+    // 测试1: 初始化
+    async function testInitialize() {
+      const result = document.getElementById('init-result');
+      result.innerHTML = '测试中...';
+
+      try {
+        const response = await chrome.runtime.sendMessage({ action: 'getAllProfiles' });
+        if (response.success) {
+          result.innerHTML = `<span class="success">✅ 初始化成功</span>\n` +
+            `资料数量: ${response.profiles.length}\n` +
+            `激活资料: ${response.activeProfileId}\n` +
+            JSON.stringify(response.profiles, null, 2);
+        } else {
+          result.innerHTML = `<span class="error">❌ 初始化失败</span>\n${response.error}`;
+        }
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试2: 保存
+    async function testSave() {
+      const result = document.getElementById('save-result');
+      result.innerHTML = '保存测试数据中...';
+
+      try {
+        const testData = {
+          basicInfo: {
+            fullName: '测试用户',
+            phone: '13800138000',
+            email: 'test@example.com'
+          }
+        };
+
+        const response = await chrome.runtime.sendMessage({
+          action: 'updateProfile',
+          profileId: 'test-id',
+          updates: testData
+        });
+
+        if (response.success) {
+          result.innerHTML = `<span class="success">✅ 保存成功</span>\n` +
+            `数据: ${JSON.stringify(testData, null, 2)}`;
+        } else {
+          result.innerHTML = `<span class="error">❌ 保存失败</span>\n${response.error}`;
+        }
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试2: 加载
+    async function testLoad() {
+      const result = document.getElementById('save-result');
+      result.innerHTML = '加载数据中...';
+
+      try {
+        const response = await chrome.runtime.sendMessage({ action: 'getActiveProfile' });
+        if (response.success && response.profile) {
+          result.innerHTML = `<span class="success">✅ 加载成功</span>\n` +
+            `资料名称: ${response.profile.name}\n` +
+            `姓名: ${response.profile.basicInfo.fullName}\n` +
+            `手机: ${response.profile.basicInfo.phone}\n` +
+            `邮箱: ${response.profile.basicInfo.email}\n` +
+            `教育经历: ${response.profile.education.length} 条\n` +
+            `工作经历: ${response.profile.workExperience.length} 条`;
+        } else {
+          result.innerHTML = `<span class="error">❌ 加载失败</span>\n无激活资料`;
+        }
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试3: 添加资料
+    async function testAddProfile() {
+      const result = document.getElementById('profile-result');
+      result.innerHTML = '添加资料中...';
+
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: 'addProfile',
+          name: '测试资料_' + Date.now()
+        });
+
+        if (response.success) {
+          result.innerHTML = `<span class="success">✅ 添加成功</span>\n` +
+            `新资料ID: ${response.profileId}`;
+        } else {
+          result.innerHTML = `<span class="error">❌ 添加失败</span>\n${response.error}`;
+        }
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试4: 查看存储信息
+    async function testStorageInfo() {
+      const result = document.getElementById('capacity-result');
+      result.innerHTML = '查询存储信息中...';
+
+      try {
+        // 直接使用Chrome API查询
+        chrome.storage.local.getBytesInUse('jobAutofillData', (bytes) => {
+          const sizeInMB = (bytes / (1024 * 1024)).toFixed(2);
+          const percentUsed = ((bytes / (5 * 1024 * 1024)) * 100).toFixed(1);
+
+          result.innerHTML = `<span class="success">✅ 存储信息</span>\n` +
+            `已使用: ${bytes} 字节 (${sizeInMB} MB)\n` +
+            `使用率: ${percentUsed}%\n` +
+            `限制: 5 MB\n` +
+            `剩余: ${(5 - sizeInMB).toFixed(2)} MB`;
+        });
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试5: 大数据
+    async function testLargeData() {
+      const result = document.getElementById('capacity-result');
+      result.innerHTML = '生成大数据测试...';
+
+      try {
+        // 生成大量数据
+        const largeData = {
+          profiles: []
+        };
+
+        for (let i = 0; i < 10; i++) {
+          largeData.profiles.push({
+            id: 'test_' + i,
+            name: '测试资料_' + i,
+            education: Array(5).fill(null).map((_, j) => ({
+              id: 'edu_' + j,
+              school: '测试大学' + j,
+              major: '计算机科学与技术',
+              description: '这是一段很长的描述'.repeat(20)
+            }))
+          });
+        }
+
+        const dataStr = JSON.stringify(largeData);
+        const sizeInMB = (new Blob([dataStr]).size / (1024 * 1024)).toFixed(2);
+
+        result.innerHTML = `<span class="success">✅ 生成成功</span>\n` +
+          `数据大小: ${sizeInMB} MB\n` +
+          `资料数量: ${largeData.profiles.length}\n` +
+          `总字段数: ${largeData.profiles.length * 5}`;
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 测试6: 导出
+    async function testExport() {
+      const result = document.getElementById('export-result');
+      result.innerHTML = '导出数据中...';
+
+      try {
+        const response = await chrome.runtime.sendMessage({ action: 'exportData' });
+        if (response.success) {
+          const blob = new Blob([response.data], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `backup_${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+
+          result.innerHTML = `<span class="success">✅ 导出成功</span>\n` +
+            `文件大小: ${(new Blob([response.data]).size / 1024).toFixed(2)} KB\n` +
+            `已开始下载...`;
+        } else {
+          result.innerHTML = `<span class="error">❌ 导出失败</span>\n${response.error}`;
+        }
+      } catch (error) {
+        result.innerHTML = `<span class="error">❌ 错误</span>\n${error.message}`;
+      }
+    }
+
+    // 页面加载时运行基础测试
+    window.addEventListener('load', () => {
+      console.log('存储测试页面已加载');
+      testInitialize();
+    });
+  </script>
+</body>
+</html>

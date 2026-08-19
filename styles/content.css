@@ -1,0 +1,161 @@
+/* ============================================================================
+   Content Script 样式
+   ============================================================================ */
+
+/* 悬浮按钮 */
+#job-autofill-float-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 100px;
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  cursor: pointer;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  user-select: none;
+}
+
+#job-autofill-float-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+
+#job-autofill-float-btn:active {
+  transform: scale(0.95);
+}
+
+#job-autofill-float-btn.loading {
+  animation: rotate 1s linear infinite;
+}
+
+.float-btn-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.float-btn-text {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 通知提示 */
+#job-autofill-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000000;
+  animation: slideIn 0.3s ease;
+  max-width: 300px;
+  word-wrap: break-word;
+}
+
+#job-autofill-notification.success {
+  background-color: #4caf50;
+  color: white;
+}
+
+#job-autofill-notification.warning {
+  background-color: #ff9800;
+  color: white;
+}
+
+#job-autofill-notification.error {
+  background-color: #f44336;
+  color: white;
+}
+
+#job-autofill-notification.info {
+  background-color: #2196f3;
+  color: white;
+}
+
+#job-autofill-notification.fade-out {
+  animation: slideOut 0.3s ease;
+  opacity: 0;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+}
+
+/* 填充字段高亮（临时）*/
+input[style*="background-color: rgb(232, 245, 233)"],
+textarea[style*="background-color: rgb(232, 245, 233)"],
+select[style*="background-color: rgb(232, 245, 233)"] {
+  transition: all 2s ease;
+}
+
+/* 新增通知样式 */
+.job-autofill-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000000;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateX(100px);
+  transition: all 0.3s ease;
+}
+
+.job-autofill-notification.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.job-autofill-notification.success {
+  border-left: 4px solid #10b981;
+  color: #065f46;
+}
+
+.job-autofill-notification.error {
+  border-left: 4px solid #ef4444;
+  color: #991b1b;
+}
+
+.job-autofill-notification.warning {
+  border-left: 4px solid #f59e0b;
+  color: #92400e;
+}

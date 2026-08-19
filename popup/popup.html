@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>秋招网申助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- 极简设计，参考 ApplyEase -->
+  <div class="container">
+
+    <!-- 头部：Logo + 标题 -->
+    <div class="header">
+      <img src="../icons/icon48.png" alt="logo" class="logo">
+      <div class="title">秋招网申助手</div>
+    </div>
+
+    <!-- 资料选择器 -->
+    <div class="profile-selector">
+      <select id="profileSelect">
+        <option value="">加载中...</option>
+      </select>
+      <button id="addProfileBtn" class="icon-btn" title="新增资料">+</button>
+    </div>
+
+    <!-- 主要操作按钮 -->
+    <div class="action-buttons">
+      <button id="fillBtn" class="btn-primary">
+        ✨ 填充当前页面
+      </button>
+      <button id="settingsBtn" class="btn-secondary">
+        ⚙️ 配置资料
+      </button>
+    </div>
+
+    <!-- 加载状态 -->
+    <div id="loadingState" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      <span>填充中...</span>
+    </div>
+
+    <!-- 状态信息 -->
+    <div class="status-info">
+      <div class="status-item">
+        <span class="label">当前资料</span>
+        <span id="currentProfile" class="value">-</span>
+      </div>
+      <div class="status-item">
+        <span class="label">完整度</span>
+        <span id="completeness" class="value">-</span>
+      </div>
+      <div class="status-item">
+        <span class="label">上次使用</span>
+        <span id="lastUsed" class="value">-</span>
+      </div>
+    </div>
+
+    <!-- 分隔线 -->
+    <div class="divider"></div>
+
+    <!-- 底部链接 -->
+    <div class="footer-links">
+      <a href="#" id="exportLink">导出数据</a>
+      <span class="separator">·</span>
+      <a href="#" id="importLink">导入数据</a>
+      <span class="separator">·</span>
+      <a href="#" id="helpLink">使用帮助</a>
+    </div>
+
+  </div>
+
+  <script src="../scripts/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,567 @@
+// ============================================================================
+// 数据存储管理模块 - 优化版
+// 基于参考项目的最佳实践，增加错误处理和性能优化
+// ============================================================================
+
+class StorageManager {
+  constructor() {
+    this.storageKey = 'jobAutofillData';
+    this.saveDebounceTimer = null;
+    this.saveDebounceDelay = 500; // 防抖延迟500ms
+  }
+
+  // 获取默认空资料模板
+  getEmptyProfile() {
+    return {
+      id: this.generateId(),
+      name: '默认资料',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+
+      // 基本信息
+      basicInfo: {
+        fullName: '',
+        firstName: '',
+        lastName: '',
+        middleName: '',
+        phone: '',
+        phoneType: '', // Mobile, Home, Work
+        email: '',
+        gender: '',
+        birthDate: '',
+        idCard: '',
+
+        // 地址信息（详细拆分）
+        address: '',      // 完整地址
+        street: '',       // 街道
+        city: '',         // 城市
+        state: '',        // 省/州
+        country: '',      // 国家
+        zipCode: '',      // 邮编
+        location: '',     // 简化地址（兼容旧版）
+
+        // 社交链接
+        linkedin: '',
+        github: '',
+        website: '',
+        twitter: ''
+      },
+
+      // 教育经历（可动态添加）
+      education: [
+        {
+          id: this.generateId(),
+          school: '',
+          major: '',
+          degree: '',
+          startDate: '',
+          endDate: '',
+          gpa: '',
+          rank: '',
+          description: ''
+        }
+      ],
+
+      // 工作/实习经历
+      workExperience: [
+        {
+          id: this.generateId(),
+          company: '',
+          position: '',
+          startDate: '',
+          endDate: '',
+          description: ''
+        }
+      ],
+
+      // 项目经历
+      projects: [
+        {
+          id: this.generateId(),
+          name: '',
+          role: '',
+          startDate: '',
+          endDate: '',
+          technologies: [],
+          description: '',
+          achievements: ''
+        }
+      ],
+
+      // 技能标签
+      skills: [],
+
+      // 证书
+      certificates: [],
+
+      // 自我介绍模板
+      introTemplates: {
+        default: '',
+        custom: []
+      },
+
+      // 简历文件（base64或URL）
+      resumeFile: null,
+      resumeFileName: ''
+    };
+  }
+
+  // 生成唯一ID
+  generateId() {
+    return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+
+  // 初始化存储（首次使用）
+  async initialize() {
+    try {
+      const data = await this.loadAll();
+      if (!data || !data.profiles || data.profiles.length === 0) {
+        const defaultData = {
+          version: '1.0.0', // 数据版本
+          profiles: [this.getEmptyProfile()],
+          activeProfileId: null,
+          settings: {
+            aiEnabled: false,
+            aiProvider: 'deepseek',
+            aiApiKey: '',
+            aiApiUrl: '',
+            autoFillOnPageLoad: false,
+            highlightFilledFields: true
+          },
+          createdAt: new Date().toISOString()
+        };
+        defaultData.activeProfileId = defaultData.profiles[0].id;
+        await this.saveAll(defaultData);
+        console.log('[存储] 初始化完成');
+        return defaultData;
+      }
+      console.log('[存储] 加载现有数据');
+      return data;
+    } catch (error) {
+      console.error('[存储] 初始化失败:', error);
+      throw error;
+    }
+  }
+
+  // 加载所有数据 - 增强错误处理
+  async loadAll() {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.storage.local.get(this.storageKey, (result) => {
+          if (chrome.runtime.lastError) {
+            console.error('[存储] 加载失败:', chrome.runtime.lastError);
+            reject(chrome.runtime.lastError);
+            return;
+          }
+
+          const data = result[this.storageKey];
+
+          // 数据校验
+          if (data && this.validateData(data)) {
+            console.log('[存储] 数据加载成功，大小:', JSON.stringify(data).length, '字节');
+            resolve(data);
+          } else if (data) {
+            console.warn('[存储] 数据格式异常，尝试修复');
+            const fixed = this.fixData(data);
+            resolve(fixed);
+          } else {
+            resolve(null);
+          }
+        });
+      } catch (error) {
+        console.error('[存储] 加载异常:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // 保存所有数据 - 增强错误处理和容量检测
+  async saveAll(data) {
+    return new Promise((resolve, reject) => {
+      try {
+        // 添加更新时间戳
+        data.updatedAt = new Date().toISOString();
+
+        // 检查数据大小（Chrome限制5MB）
+        const dataStr = JSON.stringify(data);
+        const sizeInBytes = new Blob([dataStr]).size;
+        const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
+
+        console.log(`[存储] 数据大小: ${sizeInMB}MB (${sizeInBytes} 字节)`);
+
+        if (sizeInBytes > 5 * 1024 * 1024) {
+          const error = new Error(`数据过大(${sizeInMB}MB)，超过5MB限制。请删除部分资料或简历文件。`);
+          console.error('[存储]', error.message);
+          reject(error);
+          return;
+        }
+
+        if (sizeInBytes > 4 * 1024 * 1024) {
+          console.warn(`[存储] 警告: 数据接近上限(${sizeInMB}MB/5MB)`);
+        }
+
+        chrome.storage.local.set({ [this.storageKey]: data }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('[存储] 保存失败:', chrome.runtime.lastError);
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          console.log('[存储] 保存成功');
+          resolve();
+        });
+      } catch (error) {
+        console.error('[存储] 保存异常:', error);
+        reject(error);
+      }
+    });
+  }
+
+  // 防抖保存 - 避免频繁写入
+  async saveAllDebounced(data) {
+    return new Promise((resolve, reject) => {
+      clearTimeout(this.saveDebounceTimer);
+      this.saveDebounceTimer = setTimeout(async () => {
+        try {
+          await this.saveAll(data);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, this.saveDebounceDelay);
+    });
+  }
+
+  // 数据验证
+  validateData(data) {
+    if (!data || typeof data !== 'object') return false;
+    if (!Array.isArray(data.profiles)) return false;
+    if (!data.settings || typeof data.settings !== 'object') return false;
+    return true;
+  }
+
+  // 数据修复
+  fixData(data) {
+    console.log('[存储] 执行数据修复');
+    if (!data.profiles) data.profiles = [];
+    if (!data.settings) data.settings = {};
+    if (!data.activeProfileId && data.profiles.length > 0) {
+      data.activeProfileId = data.profiles[0].id;
+    }
+    return data;
+  }
+
+  // 获取当前激活的资料
+  async getActiveProfile() {
+    try {
+      const data = await this.loadAll();
+      if (!data || !data.activeProfileId) return null;
+      const profile = data.profiles.find(p => p.id === data.activeProfileId);
+      if (!profile) {
+        console.warn('[存储] 未找到激活的资料，使用第一个');
+        return data.profiles[0] || null;
+      }
+      return profile;
+    } catch (error) {
+      console.error('[存储] 获取激活资料失败:', error);
+      return null;
+    }
+  }
+
+  // 获取所有资料列表
+  async getAllProfiles() {
+    try {
+      const data = await this.loadAll();
+      return data?.profiles || [];
+    } catch (error) {
+      console.error('[存储] 获取资料列表失败:', error);
+      return [];
+    }
+  }
+
+  // 添加新资料
+  async addProfile(name = '新资料') {
+    try {
+      const data = await this.loadAll();
+      const newProfile = this.getEmptyProfile();
+      newProfile.name = name;
+      data.profiles.push(newProfile);
+      await this.saveAll(data);
+      console.log('[存储] 新增资料:', name);
+      return newProfile.id;
+    } catch (error) {
+      console.error('[存储] 添加资料失败:', error);
+      throw error;
+    }
+  }
+
+  // 更新资料
+  async updateProfile(profileId, updates) {
+    try {
+      const data = await this.loadAll();
+      const index = data.profiles.findIndex(p => p.id === profileId);
+      if (index !== -1) {
+        updates.updatedAt = new Date().toISOString();
+        data.profiles[index] = { ...data.profiles[index], ...updates };
+        await this.saveAll(data);
+        console.log('[存储] 更新资料:', profileId);
+        return true;
+      }
+      console.warn('[存储] 未找到资料:', profileId);
+      return false;
+    } catch (error) {
+      console.error('[存储] 更新资料失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除资料
+  async deleteProfile(profileId) {
+    try {
+      const data = await this.loadAll();
+      if (data.profiles.length <= 1) {
+        console.warn('[存储] 至少保留一份资料');
+        return false;
+      }
+      data.profiles = data.profiles.filter(p => p.id !== profileId);
+      if (data.activeProfileId === profileId) {
+        data.activeProfileId = data.profiles[0].id;
+      }
+      await this.saveAll(data);
+      console.log('[存储] 删除资料:', profileId);
+      return true;
+    } catch (error) {
+      console.error('[存储] 删除资料失败:', error);
+      throw error;
+    }
+  }
+
+  // 切换激活资料
+  async setActiveProfile(profileId) {
+    try {
+      const data = await this.loadAll();
+      if (data.profiles.find(p => p.id === profileId)) {
+        data.activeProfileId = profileId;
+        await this.saveAll(data);
+        console.log('[存储] 切换资料:', profileId);
+        return true;
+      }
+      console.warn('[存储] 资料不存在:', profileId);
+      return false;
+    } catch (error) {
+      console.error('[存储] 切换资料失败:', error);
+      throw error;
+    }
+  }
+
+  // 获取设置
+  async getSettings() {
+    try {
+      const data = await this.loadAll();
+      return data?.settings || {};
+    } catch (error) {
+      console.error('[存储] 获取设置失败:', error);
+      return {};
+    }
+  }
+
+  // 更新设置
+  async updateSettings(updates) {
+    try {
+      const data = await this.loadAll();
+      data.settings = { ...data.settings, ...updates };
+      await this.saveAll(data);
+      console.log('[存储] 更新设置');
+    } catch (error) {
+      console.error('[存储] 更新设置失败:', error);
+      throw error;
+    }
+  }
+
+  // 添加教育经历
+  async addEducation(profileId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.education.push({
+          id: this.generateId(),
+          school: '',
+          major: '',
+          degree: '',
+          startDate: '',
+          endDate: '',
+          gpa: '',
+          rank: '',
+          description: ''
+        });
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 添加教育经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除教育经历
+  async deleteEducation(profileId, eduId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.education = profile.education.filter(e => e.id !== eduId);
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 删除教育经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 添加工作经历
+  async addWorkExperience(profileId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.workExperience.push({
+          id: this.generateId(),
+          company: '',
+          position: '',
+          startDate: '',
+          endDate: '',
+          description: ''
+        });
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 添加工作经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除工作经历
+  async deleteWorkExperience(profileId, workId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.workExperience = profile.workExperience.filter(w => w.id !== workId);
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 删除工作经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 添加项目经历
+  async addProject(profileId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.projects.push({
+          id: this.generateId(),
+          name: '',
+          role: '',
+          startDate: '',
+          endDate: '',
+          technologies: [],
+          description: '',
+          achievements: ''
+        });
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 添加项目经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 删除项目经历
+  async deleteProject(profileId, projectId) {
+    try {
+      const data = await this.loadAll();
+      const profile = data.profiles.find(p => p.id === profileId);
+      if (profile) {
+        profile.projects = profile.projects.filter(p => p.id !== projectId);
+        await this.saveAll(data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[存储] 删除项目经历失败:', error);
+      throw error;
+    }
+  }
+
+  // 导出数据（备份）
+  async exportData() {
+    try {
+      const data = await this.loadAll();
+      return JSON.stringify(data, null, 2);
+    } catch (error) {
+      console.error('[存储] 导出数据失败:', error);
+      throw error;
+    }
+  }
+
+  // 导入数据（恢复）
+  async importData(jsonString) {
+    try {
+      const data = JSON.parse(jsonString);
+      if (!this.validateData(data)) {
+        throw new Error('数据格式不正确');
+      }
+      await this.saveAll(data);
+      console.log('[存储] 导入数据成功');
+      return true;
+    } catch (error) {
+      console.error('[存储] 导入数据失败:', error);
+      throw error;
+    }
+  }
+
+  // 清空所有数据（危险操作）
+  async clearAll() {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.remove(this.storageKey, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          console.log('[存储] 清空所有数据');
+          resolve();
+        }
+      });
+    });
+  }
+
+  // 获取存储使用情况
+  async getStorageInfo() {
+    return new Promise((resolve) => {
+      chrome.storage.local.getBytesInUse(this.storageKey, (bytes) => {
+        const sizeInMB = (bytes / (1024 * 1024)).toFixed(2);
+        const percentUsed = ((bytes / (5 * 1024 * 1024)) * 100).toFixed(1);
+        resolve({
+          bytes,
+          sizeInMB,
+          percentUsed,
+          limit: '5MB'
+        });
+      });
+    });
+  }
+}
+
+// 导出单例
+const storageManager = new StorageManager();
