@@ -1,122 +1,821 @@
 // ============================================================================
-// Options 页面脚本 - 配置界面
+// Options 页面脚本 - 全量校招网申字段增强版
 // ============================================================================
 
 let currentProfile = null;
 let allProfiles = [];
 let activeProfileId = null;
-
-// ============================================================================
-// 初始化
-// ============================================================================
+let aiKeySaveTimer = null;
+let aiUrlSaveTimer = null;
+let aiModelSaveTimer = null;
+let ocrSaveTimer = null;
+let profileSaveTimer = null;
+let modelFetchSeq = 0;
+let selectedAiResumeFile = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[Options] 初始化');
+  await initTheme();
+  initBirthDatePicker();
   await loadProfiles();
+  await loadSubmissions();
   bindEvents();
+  bindSubmissionEvents();
+  initAllAppleSelects();
+  initTabNav();
+  bindAppLogging();
 });
 
-// ============================================================================
-// 数据加载（复用popup.js的逻辑）
-// ============================================================================
+async function initTheme() {
+  try {
+    const response = await sendMessage({ action: 'getSettings' });
+    const saved = response && response.success ? response.settings?.uiTheme : '';
+    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+    const theme = saved || (prefersLight ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  } catch (e) {
+    console.log('[Options] 主题初始化异常，使用默认主题', e);
+  }
+}
 
-async function loadProfiles() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'getAllProfiles' }, (response) => {
-      if (response && response.success) {
-        allProfiles = response.profiles;
-        activeProfileId = response.activeProfileId;
+async function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    await sendMessage({ action: 'updateSettings', settings: { uiTheme: next } });
+    showToast(next === 'light' ? '☀️ 已切换为日间明亮主题' : '🌙 已切换为夜间深色主题', 'info');
+  } catch (e) {
+    console.error('保存主题设置失败:', e);
+  }
+}
 
-        // 填充下拉框
-        const select = document.getElementById('profileSelect');
-        select.innerHTML = '';
-        allProfiles.forEach(profile => {
-          const option = document.createElement('option');
-          option.value = profile.id;
-          option.textContent = profile.name;
-          if (profile.id === activeProfileId) {
-            option.selected = true;
-          }
-          select.appendChild(option);
-        });
-
-        // 加载当前激活的资料
-        currentProfile = allProfiles.find(p => p.id === activeProfileId);
-        if (currentProfile) {
-          loadProfileToForm(currentProfile);
-        }
-
-        // 加载AI设置
-        loadAISettings();
+function sendMessage(payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(payload, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
       }
-      resolve();
+      resolve(response || {});
     });
   });
 }
 
-// 加载AI设置
-function loadAISettings() {
-  chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
-    if (response && response.success) {
-      const settings = response.settings;
-      document.getElementById('aiEnabled').checked = settings.aiEnabled || false;
-      document.getElementById('aiProvider').value = settings.aiProvider || 'deepseek';
-      document.getElementById('aiApiKey').value = settings.aiApiKey || '';
-      document.getElementById('aiApiUrl').value = settings.aiApiUrl || '';
-
-      // 显示/隐藏AI设置
-      document.getElementById('aiSettings').style.display = settings.aiEnabled ? 'block' : 'none';
-    }
-  });
+function generateId() {
+  return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
 }
 
-// 加载资料到表单
-function loadProfileToForm(profile) {
-  // 基础信息
-  document.getElementById('fullName').value = profile.basicInfo.fullName || '';
-  document.getElementById('firstName').value = profile.basicInfo.firstName || '';
-  document.getElementById('lastName').value = profile.basicInfo.lastName || '';
-  document.getElementById('phone').value = profile.basicInfo.phone || '';
-  document.getElementById('email').value = profile.basicInfo.email || '';
-  document.getElementById('gender').value = profile.basicInfo.gender || '';
-  document.getElementById('birthDate').value = profile.basicInfo.birthDate || '';
-  document.getElementById('idCard').value = profile.basicInfo.idCard || '';
+function attr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  // 地址信息
-  document.getElementById('city').value = profile.basicInfo.city || '';
-  document.getElementById('state').value = profile.basicInfo.state || '';
-  document.getElementById('country').value = profile.basicInfo.country || '';
-  document.getElementById('zipCode').value = profile.basicInfo.zipCode || '';
-  document.getElementById('street').value = profile.basicInfo.street || '';
+function html(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  // 社交链接
-  document.getElementById('linkedin').value = profile.basicInfo.linkedin || '';
-  document.getElementById('github').value = profile.basicInfo.github || '';
-  document.getElementById('website').value = profile.basicInfo.website || '';
-  document.getElementById('twitter').value = profile.basicInfo.twitter || '';
+function emptyEducation() {
+  return {
+    id: generateId(),
+    school: '',
+    college: '',
+    major: '',
+    degree: '',
+    degreeType: '普通全日制统招',
+    startDate: '',
+    endDate: '',
+    gpa: '',
+    rank: '',
+    courses: '',
+    description: ''
+  };
+}
 
-  // 教育经历
-  renderEducationList(profile.education);
+function emptyWork() {
+  return {
+    id: generateId(),
+    company: '',
+    department: '',
+    position: '',
+    workType: '实习',
+    city: '',
+    startDate: '',
+    endDate: '',
+    description: '',
+    achievements: ''
+  };
+}
 
-  // 工作经历
-  renderWorkList(profile.workExperience);
+function emptyProject() {
+  return {
+    id: generateId(),
+    name: '',
+    role: '',
+    projectType: '商业项目',
+    techStack: '',
+    startDate: '',
+    endDate: '',
+    projectUrl: '',
+    description: '',
+    responsibilities: '',
+    achievements: ''
+  };
+}
 
-  // 项目经历
-  renderProjectList(profile.projects);
+function emptyAward() {
+  return {
+    id: generateId(),
+    name: '',
+    level: '校级',
+    date: ''
+  };
+}
 
-  // 技能
-  renderSkillsList(profile.skills);
+function collectAiSettingsFromDom() {
+  return {
+    aiEnabled: document.getElementById('aiEnabled').checked,
+    aiProvider: document.getElementById('aiProvider').value,
+    aiApiKey: document.getElementById('aiApiKey').value.trim(),
+    aiApiUrl: document.getElementById('aiApiUrl').value.trim(),
+    aiModel: getSelectedModel(),
+    ocrApiKey: document.getElementById('ocrApiKey')?.value.trim() || ''
+  };
+}
 
-  // 自我介绍
-  document.getElementById('introduction').value = profile.introTemplates?.default || '';
+function getSelectedModel() {
+  const select = document.getElementById('aiModel');
+  const custom = document.getElementById('aiModelCustom');
+  if (!select) return (custom && custom.value.trim()) || '';
+  if (select.value === '__custom__') return (custom && custom.value.trim()) || '';
+  return (select.value || '').trim() || ((custom && custom.value.trim()) || '');
+}
 
-  // 简历文件
-  if (profile.resumeFileName) {
-    document.getElementById('resumeFileName').textContent = profile.resumeFileName;
+function setModelHint(text, isError) {
+  const hint = document.getElementById('aiModelHint');
+  if (!hint) return;
+  hint.textContent = text;
+  hint.style.color = isError ? '#f87171' : 'var(--text-muted)';
+}
+
+function populateModelSelect(models, selected) {
+  const select = document.getElementById('aiModel');
+  const custom = document.getElementById('aiModelCustom');
+  if (!select) return;
+
+  const ids = Array.from(new Set((models || []).filter(Boolean)));
+  select.innerHTML = '';
+
+  if (!ids.length) {
+    select.appendChild(new Option('未获取到模型，请手动填写', ''));
+    select.appendChild(new Option('手动输入…', '__custom__'));
+    select.value = selected ? '__custom__' : '';
+    custom.style.display = 'block';
+    if (selected) custom.value = selected;
+    return;
+  }
+
+  ids.forEach((id) => select.appendChild(new Option(id, id)));
+  select.appendChild(new Option('手动输入…', '__custom__'));
+
+  if (selected && ids.includes(selected)) {
+    select.value = selected;
+    custom.style.display = 'none';
+    custom.value = '';
+  } else if (selected) {
+    select.value = '__custom__';
+    custom.style.display = 'block';
+    custom.value = selected;
+  } else {
+    select.value = ids[0];
+    custom.style.display = 'none';
+  }
+
+  if (select._refreshAppleSelect) {
+    select._refreshAppleSelect();
+  } else {
+    upgradeToAppleSelect(select);
   }
 }
 
-// 渲染教育经历（简化版）
+function syncCustomModelVisibility() {
+  const select = document.getElementById('aiModel');
+  const custom = document.getElementById('aiModelCustom');
+  if (!select || !custom) return;
+  const show = select.value === '__custom__' || !select.value;
+  custom.style.display = show ? 'block' : 'none';
+}
+
+function scheduleOcrSettingsSave() {
+  clearTimeout(ocrSaveTimer);
+  ocrSaveTimer = setTimeout(autoSaveAiSettings, 400);
+}
+
+async function refreshModelList({ silent = false } = {}) {
+  const settings = collectAiSettingsFromDom();
+  if (!settings.aiApiKey) {
+    setModelHint('请先填写 API Key，再获取可用模型', true);
+    if (!silent) showToast('请先填写 API Key', 'warning');
+    return [];
+  }
+
+  const seq = ++modelFetchSeq;
+  const previous = getSelectedModel();
+  setModelHint('正在用 API Key 获取可用模型…');
+  const btn = document.getElementById('refreshModelsBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '🔄 获取中...';
+  }
+
+  try {
+    const models = await resumeParser.listModels(settings);
+    if (seq !== modelFetchSeq) return models;
+    populateModelSelect(models, previous);
+    const chosen = getSelectedModel();
+    setModelHint(`已获取 ${models.length} 个可用模型` + (chosen ? `，当前：${chosen}` : ''));
+    await autoSaveAiSettings();
+    if (!silent) showToast(`已获取 ${models.length} 个模型`, 'success');
+    return models;
+  } catch (error) {
+    if (seq !== modelFetchSeq) return [];
+    populateModelSelect(previous ? [previous] : [], previous);
+    const select = document.getElementById('aiModel');
+    if (select) {
+      if (![...select.options].some((opt) => opt.value === '__custom__')) {
+        select.appendChild(new Option('手动输入…', '__custom__'));
+      }
+      select.value = '__custom__';
+    }
+    syncCustomModelVisibility();
+    const custom = document.getElementById('aiModelCustom');
+    if (custom && previous) custom.value = previous;
+    setModelHint(`无法自动列出模型：${error.message}。请手动填写模型名。`, true);
+    if (!silent) showToast('未能列出模型，请手动填写', 'warning');
+    return [];
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span>获取可用模型</span>';
+    }
+  }
+}
+
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = value == null ? '' : value;
+  if (id === 'birthDate') {
+    syncBirthDatePickerFromValue(el.value);
+  }
+}
+
+function toDateInput(value) {
+  const v = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  if (/^\d{4}-\d{2}$/.test(v)) return `${v}-01`;
+  const matched = v.match(/^(\d{4})[./年-](\d{1,2})(?:[./月-](\d{1,2}))?/);
+  if (matched) {
+    const month = matched[2].padStart(2, '0');
+    const day = (matched[3] || '01').padStart(2, '0');
+    return `${matched[1]}-${month}-${day}`;
+  }
+  return '';
+}
+
+// ============================================================================
+// 出生日期极速年月日选择器 (Apple HIG 极速级联选择，告别繁琐翻页)
+// ============================================================================
+
+function initBirthDatePicker() {
+  const yearSelect = document.getElementById('birthYear');
+  const monthSelect = document.getElementById('birthMonth');
+  const daySelect = document.getElementById('birthDay');
+  const hiddenDate = document.getElementById('birthDate');
+  if (!yearSelect || !monthSelect || !daySelect || !hiddenDate) return;
+
+  // 填充年份 (从 2012 倒序到 1960，最常选的 1995~2005 触手可及)
+  yearSelect.innerHTML = '<option value="">年份</option>';
+  const currentYear = new Date().getFullYear();
+  const maxYear = currentYear - 12; // 约 2014
+  for (let y = maxYear; y >= 1960; y--) {
+    const opt = document.createElement('option');
+    opt.value = String(y);
+    opt.textContent = `${y}年`;
+    yearSelect.appendChild(opt);
+  }
+
+  // 填充月份 (01 ~ 12)
+  monthSelect.innerHTML = '<option value="">月份</option>';
+  for (let m = 1; m <= 12; m++) {
+    const val = String(m).padStart(2, '0');
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = `${val}月`;
+    monthSelect.appendChild(opt);
+  }
+
+  function updateDaysOptions(selectedDay = '') {
+    const y = parseInt(yearSelect.value, 10);
+    const m = parseInt(monthSelect.value, 10);
+    let maxDays = 31;
+    if (m === 2) {
+      if (y) {
+        maxDays = (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28;
+      } else {
+        maxDays = 29;
+      }
+    } else if ([4, 6, 9, 11].includes(m)) {
+      maxDays = 30;
+    }
+
+    const prevVal = selectedDay || daySelect.value;
+    daySelect.innerHTML = '<option value="">日</option>';
+    for (let d = 1; d <= maxDays; d++) {
+      const val = String(d).padStart(2, '0');
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = `${val}日`;
+      daySelect.appendChild(opt);
+    }
+
+    if (prevVal && parseInt(prevVal, 10) <= maxDays) {
+      daySelect.value = prevVal.padStart(2, '0');
+    }
+
+    if (daySelect._refreshAppleSelect) {
+      daySelect._refreshAppleSelect();
+    } else {
+      upgradeToAppleSelect(daySelect);
+    }
+  }
+
+  updateDaysOptions();
+
+  function syncToHidden() {
+    const y = yearSelect.value;
+    const m = monthSelect.value;
+    const d = daySelect.value;
+    if (y && m && d) {
+      hiddenDate.value = `${y}-${m}-${d}`;
+    } else if (y && m) {
+      hiddenDate.value = `${y}-${m}-01`;
+    } else if (y) {
+      hiddenDate.value = `${y}-01-01`;
+    } else {
+      hiddenDate.value = '';
+    }
+    hiddenDate.dispatchEvent(new Event('input', { bubbles: true }));
+    hiddenDate.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  yearSelect.addEventListener('change', () => {
+    updateDaysOptions();
+    syncToHidden();
+  });
+
+  monthSelect.addEventListener('change', () => {
+    updateDaysOptions();
+    syncToHidden();
+  });
+
+  daySelect.addEventListener('change', () => {
+    syncToHidden();
+  });
+
+  upgradeToAppleSelect(yearSelect);
+  upgradeToAppleSelect(monthSelect);
+  upgradeToAppleSelect(daySelect);
+}
+
+function syncBirthDatePickerFromValue(val) {
+  const yearSelect = document.getElementById('birthYear');
+  const monthSelect = document.getElementById('birthMonth');
+  const daySelect = document.getElementById('birthDay');
+  if (!yearSelect || !monthSelect || !daySelect) return;
+
+  const str = String(val || '').trim();
+  if (!str) {
+    yearSelect.value = '';
+    monthSelect.value = '';
+    daySelect.value = '';
+    yearSelect._refreshAppleSelect?.();
+    monthSelect._refreshAppleSelect?.();
+    daySelect._refreshAppleSelect?.();
+    return;
+  }
+
+  const parts = str.split(/[-/.\s年日月]/).filter(Boolean);
+  if (parts.length >= 1) {
+    const y = parts[0];
+    if (yearSelect.querySelector(`option[value="${y}"]`)) {
+      yearSelect.value = y;
+    }
+  }
+  if (parts.length >= 2) {
+    const m = parts[1].padStart(2, '0');
+    if (monthSelect.querySelector(`option[value="${m}"]`)) {
+      monthSelect.value = m;
+    }
+  }
+
+  const y = parseInt(yearSelect.value, 10);
+  const m = parseInt(monthSelect.value, 10);
+  let maxDays = 31;
+  if (m === 2) {
+    if (y) {
+      maxDays = (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)) ? 29 : 28;
+    } else {
+      maxDays = 29;
+    }
+  } else if ([4, 6, 9, 11].includes(m)) {
+    maxDays = 30;
+  }
+
+  daySelect.innerHTML = '<option value="">日</option>';
+  for (let d = 1; d <= maxDays; d++) {
+    const dVal = String(d).padStart(2, '0');
+    const opt = document.createElement('option');
+    opt.value = dVal;
+    opt.textContent = `${dVal}日`;
+    daySelect.appendChild(opt);
+  }
+
+  if (parts.length >= 3) {
+    const d = parts[2].padStart(2, '0');
+    if (parseInt(d, 10) <= maxDays) {
+      daySelect.value = d;
+    }
+  }
+
+  yearSelect._refreshAppleSelect?.();
+  monthSelect._refreshAppleSelect?.();
+  daySelect._refreshAppleSelect?.();
+}
+
+async function loadProfiles() {
+  const response = await sendMessage({ action: 'getAllProfiles' });
+  if (!response.success) return;
+
+  allProfiles = response.profiles || [];
+  activeProfileId = response.activeProfileId;
+
+  const select = document.getElementById('profileSelect');
+  select.innerHTML = '';
+  allProfiles.forEach((profile) => {
+    const option = document.createElement('option');
+    option.value = profile.id;
+    option.textContent = profile.name;
+    if (profile.id === activeProfileId) option.selected = true;
+    select.appendChild(option);
+  });
+
+  currentProfile = allProfiles.find((profile) => profile.id === activeProfileId) || null;
+  if (currentProfile) {
+    loadProfileToForm(currentProfile);
+  }
+  renderNavCustomDropdown();
+  await loadAISettings();
+}
+
+function renderNavCustomDropdown() {
+  const nameLabel = document.getElementById('navSelectedProfileName');
+  const menu = document.getElementById('navProfileDropdownMenu');
+  if (!nameLabel || !menu) return;
+
+  if (!currentProfile) {
+    nameLabel.textContent = '暂无简历资料';
+    menu.innerHTML = '<div class="nav-dropdown-item" style="color:var(--text-muted);">暂无资料</div>';
+    return;
+  }
+
+  nameLabel.textContent = currentProfile.name || '默认资料';
+  menu.innerHTML = '';
+
+  allProfiles.forEach((profile) => {
+    const isAct = profile.id === currentProfile.id;
+    const item = document.createElement('div');
+    item.className = 'nav-dropdown-item' + (isAct ? ' active' : '');
+    item.innerHTML = `
+      <span>${html(profile.name)}</span>
+      ${isAct ? '<span class="check-icon">✓</span>' : ''}
+    `;
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeNavCustomDropdown();
+      if (profile.id !== currentProfile.id) {
+        await switchProfile(profile.id);
+      }
+    });
+    menu.appendChild(item);
+  });
+}
+
+function toggleNavCustomDropdown(e) {
+  if (e) e.stopPropagation();
+  const dropdown = document.getElementById('navProfileDropdown');
+  if (dropdown) {
+    dropdown.classList.toggle('is-open');
+  }
+}
+
+function closeNavCustomDropdown() {
+  const dropdown = document.getElementById('navProfileDropdown');
+  if (dropdown) {
+    dropdown.classList.remove('is-open');
+  }
+}
+
+// ============================================================================
+// Apple HIG 通用自定义下拉组件 (彻底替代原生 select)
+// ============================================================================
+
+function upgradeToAppleSelect(select) {
+  if (!select || select.dataset.appleSelectInitialized) {
+    if (select && select._refreshAppleSelect) {
+      select._refreshAppleSelect();
+    }
+    return;
+  }
+  if (select.id === 'profileSelect') return; // 顶栏资料切换由专门 popover 处理
+  select.dataset.appleSelectInitialized = 'true';
+
+  // 隐藏原始 select 保留底层事件
+  select.style.display = 'none';
+  const oldArrow = select.parentNode?.querySelector('.field-arrow');
+  if (oldArrow) oldArrow.style.display = 'none';
+
+  const box = document.createElement('div');
+  box.className = 'apple-custom-select-box';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'apple-custom-select-trigger';
+
+  const label = document.createElement('span');
+  label.className = 'apple-custom-select-label';
+
+  const arrow = document.createElement('span');
+  arrow.className = 'apple-custom-select-arrow';
+  arrow.innerHTML = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
+  trigger.appendChild(label);
+  trigger.appendChild(arrow);
+
+  const popover = document.createElement('div');
+  popover.className = 'apple-custom-select-popover';
+
+  function renderOptions() {
+    popover.innerHTML = '';
+    const selectedOption = select.options[select.selectedIndex] || select.options[0];
+    label.textContent = selectedOption ? selectedOption.text : (select.placeholder || '请选择');
+
+    Array.from(select.options).forEach((opt, idx) => {
+      const optionItem = document.createElement('div');
+      const isSelected = opt.selected || idx === select.selectedIndex;
+      optionItem.className = 'apple-custom-select-option' + (isSelected ? ' selected' : '');
+      optionItem.innerHTML = `
+        <span>${html(opt.text)}</span>
+        ${isSelected ? '<span class="option-check">✓</span>' : ''}
+      `;
+
+      optionItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        box.classList.remove('is-open');
+        if (select.value !== opt.value) {
+          select.value = opt.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          renderOptions();
+        }
+      });
+      popover.appendChild(optionItem);
+    });
+  }
+
+  renderOptions();
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = box.classList.contains('is-open');
+    document.querySelectorAll('.apple-custom-select-box.is-open').forEach((b) => {
+      if (b !== box) b.classList.remove('is-open');
+    });
+    if (!isOpen) {
+      renderOptions();
+      box.classList.add('is-open');
+    } else {
+      box.classList.remove('is-open');
+    }
+  });
+
+  box.appendChild(trigger);
+  box.appendChild(popover);
+
+  select.parentNode.insertBefore(box, select.nextSibling);
+
+  // 监听原生 select 变化以保持同步
+  select.addEventListener('change', () => {
+    renderOptions();
+  });
+
+  // 保存刷新钩子
+  select._refreshAppleSelect = renderOptions;
+}
+
+function initAllAppleSelects(root = document) {
+  root.querySelectorAll('select:not([data-apple-custom="false"])').forEach(upgradeToAppleSelect);
+}
+
+// ============================================================================
+// Apple HIG 原生级模态输入与确认弹窗 (替代丑陋的 window.prompt / confirm)
+// ============================================================================
+
+function showApplePrompt({ title = '输入信息', subtitle = '', defaultValue = '', placeholder = '', confirmText = '确定', cancelText = '取消' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'apple-modal-overlay';
+    overlay.innerHTML = `
+      <div class="apple-modal-card">
+        <div class="apple-modal-icon">📇</div>
+        <div class="apple-modal-header">
+          <h3 class="apple-modal-title">${html(title)}</h3>
+          ${subtitle ? `<p class="apple-modal-subtitle">${html(subtitle)}</p>` : ''}
+        </div>
+        <div class="apple-modal-body">
+          <input type="text" class="apple-modal-input" placeholder="${attr(placeholder)}" value="${attr(defaultValue)}">
+        </div>
+        <div class="apple-modal-actions">
+          <button type="button" class="btn-modal-cancel">${html(cancelText)}</button>
+          <button type="button" class="btn-modal-confirm">${html(confirmText)}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const input = overlay.querySelector('.apple-modal-input');
+    const cancelBtn = overlay.querySelector('.btn-modal-cancel');
+    const confirmBtn = overlay.querySelector('.btn-modal-confirm');
+
+    input.focus();
+    input.select();
+
+    function cleanup(val) {
+      overlay.remove();
+      resolve(val);
+    }
+
+    cancelBtn.addEventListener('click', () => cleanup(null));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(null);
+    });
+
+    function submit() {
+      cleanup(input.value.trim());
+    }
+
+    confirmBtn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cleanup(null);
+      }
+    });
+  });
+}
+
+function showAppleConfirm({ title = '确认操作', subtitle = '', confirmText = '确定删除', cancelText = '取消', isDanger = true }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'apple-modal-overlay';
+    overlay.innerHTML = `
+      <div class="apple-modal-card">
+        <div class="apple-modal-icon ${isDanger ? 'danger' : ''}">${isDanger ? '⚠️' : '❓'}</div>
+        <div class="apple-modal-header">
+          <h3 class="apple-modal-title">${html(title)}</h3>
+          ${subtitle ? `<p class="apple-modal-subtitle">${html(subtitle)}</p>` : ''}
+        </div>
+        <div class="apple-modal-actions">
+          <button type="button" class="btn-modal-cancel">${html(cancelText)}</button>
+          <button type="button" class="btn-modal-confirm ${isDanger ? 'danger' : ''}">${html(confirmText)}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const cancelBtn = overlay.querySelector('.btn-modal-cancel');
+    const confirmBtn = overlay.querySelector('.btn-modal-confirm');
+
+    function cleanup(val) {
+      overlay.remove();
+      resolve(val);
+    }
+
+    cancelBtn.addEventListener('click', () => cleanup(false));
+    confirmBtn.addEventListener('click', () => cleanup(true));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(false);
+    });
+
+    function escHandler(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', escHandler);
+        cleanup(false);
+      }
+    }
+    document.addEventListener('keydown', escHandler);
+  });
+}
+
+async function loadAISettings() {
+  const response = await sendMessage({ action: 'getSettings' });
+  if (!response.success) return;
+  const settings = response.settings || {};
+  document.getElementById('aiEnabled').checked = !!settings.aiEnabled;
+  document.getElementById('aiProvider').value = settings.aiProvider || 'deepseek';
+  document.getElementById('aiApiKey').value = settings.aiApiKey || '';
+  document.getElementById('aiApiUrl').value = settings.aiApiUrl || '';
+  document.getElementById('aiSettings').style.display = settings.aiEnabled ? 'block' : 'none';
+  populateModelSelect(settings.aiModel ? [settings.aiModel] : [], settings.aiModel || '');
+  document.getElementById('ocrApiKey').value = settings.ocrApiKey || '';
+  if (settings.aiApiKey && settings.aiEnabled) {
+    refreshModelList({ silent: true });
+  }
+}
+
+function loadProfileToForm(profile) {
+  const info = profile.basicInfo || {};
+  setInputValue('fullName', info.fullName);
+  setInputValue('firstName', info.firstName);
+  setInputValue('lastName', info.lastName);
+  setInputValue('phone', info.phone);
+  setInputValue('email', info.email);
+  setInputValue('gender', info.gender);
+  setInputValue('birthDate', toDateInput(info.birthDate));
+  setInputValue('idCard', info.idCard);
+  setInputValue('politicalStatus', info.politicalStatus);
+  setInputValue('ethnicity', info.ethnicity);
+  setInputValue('hometown', info.hometown);
+  setInputValue('graduationDate', info.graduationDate);
+  setInputValue('emergencyContact', info.emergencyContact);
+  setInputValue('emergencyRelation', info.emergencyRelation);
+  setInputValue('emergencyPhone', info.emergencyPhone);
+  setInputValue('city', info.city);
+  setInputValue('state', info.state);
+  setInputValue('country', info.country);
+  setInputValue('zipCode', info.zipCode);
+  setInputValue('street', info.street);
+  setInputValue('linkedin', info.linkedin);
+  setInputValue('github', info.github);
+  setInputValue('website', info.website);
+  setInputValue('twitter', info.twitter);
+
+  // 求职意向
+  const job = profile.jobIntention || {};
+  setInputValue('expectedCity', job.expectedCity);
+  setInputValue('expectedPosition', job.expectedPosition);
+  setInputValue('expectedSalary', job.expectedSalary);
+  setInputValue('availableDate', job.availableDate);
+  setInputValue('referralCode', job.referralCode);
+
+  // 语言能力
+  const lang = profile.languageSkills || {};
+  setInputValue('cet4', lang.cet4);
+  setInputValue('cet6', lang.cet6);
+  setInputValue('ielts', lang.ielts);
+  setInputValue('toefl', lang.toefl);
+  setInputValue('otherLanguages', lang.otherLanguages);
+
+  // 动态列表
+  renderEducationList(profile.education && profile.education.length ? profile.education : [emptyEducation()]);
+  renderWorkList(profile.workExperience && profile.workExperience.length ? profile.workExperience : [emptyWork()]);
+  renderProjectList(profile.projects && profile.projects.length ? profile.projects : [emptyProject()]);
+  renderAwardsList(profile.awards && profile.awards.length ? profile.awards : [emptyAward()]);
+  renderSkillsList(profile.skills || []);
+
+  document.getElementById('introduction').value = profile.introTemplates?.default || '';
+  updateResumeAttachmentUI(profile.resumeFileName || '', 0);
+
+  const greetingEl = document.getElementById('hrGreetingText');
+  if (greetingEl) {
+    greetingEl.value = profile.hrGreeting || '';
+    updateGreetingCharCount(profile.hrGreeting || '');
+  }
+
+  // 刷新所有 Apple 自定义下拉选框
+  initAllAppleSelects();
+}
+
 function renderEducationList(educationList) {
   const container = document.getElementById('educationList');
   container.innerHTML = '';
@@ -127,45 +826,82 @@ function renderEducationList(educationList) {
     card.innerHTML = `
       <div class="item-card-header">
         <h4>教育经历 ${index + 1}</h4>
-        <button class="btn-delete" data-id="${edu.id}" data-type="education">删除</button>
+        <button type="button" class="btn-delete" data-id="${attr(edu.id)}" data-type="education">删除经历</button>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>学校名称 <span class="required">*</span></label>
+          <input type="text" class="edu-school" data-id="${attr(edu.id)}" value="${attr(edu.school)}" placeholder="例如: 北京大学">
+        </div>
+        <div class="form-group">
+          <label>所属学院 / 院系</label>
+          <input type="text" class="edu-college" value="${attr(edu.college)}" placeholder="例如: 计算机学院">
+        </div>
+        <div class="form-group">
+          <label>专业全称 <span class="required">*</span></label>
+          <input type="text" class="edu-major" value="${attr(edu.major)}" placeholder="例如: 计算机科学与技术">
+        </div>
+      </div>
+      <div class="form-row form-row-4">
+        <div class="form-group">
+          <label>学历层次</label>
+          <div class="select-box">
+            <select class="edu-degree">
+              <option value="">请选择</option>
+              <option value="大专" ${edu.degree === '大专' ? 'selected' : ''}>大专</option>
+              <option value="本科" ${edu.degree === '本科' ? 'selected' : ''}>本科</option>
+              <option value="硕士" ${edu.degree === '硕士' ? 'selected' : ''}>硕士</option>
+              <option value="博士" ${edu.degree === '博士' ? 'selected' : ''}>博士</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>培养方式</label>
+          <div class="select-box">
+            <select class="edu-degree-type">
+              <option value="普通全日制统招" ${edu.degreeType === '普通全日制统招' || !edu.degreeType ? 'selected' : ''}>普通全日制统招</option>
+              <option value="非全日制" ${edu.degreeType === '非全日制' ? 'selected' : ''}>非全日制</option>
+              <option value="海外留学生" ${edu.degreeType === '海外留学生' ? 'selected' : ''}>海外留学生</option>
+              <option value="定向委培" ${edu.degreeType === '定向委培' ? 'selected' : ''}>定向委培</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>GPA / 平均分</label>
+          <input type="text" class="edu-gpa" value="${attr(edu.gpa)}" placeholder="例如: 3.8/4.0 或 89/100">
+        </div>
+        <div class="form-group">
+          <label>专业 / 成绩排名</label>
+          <input type="text" class="edu-rank" value="${attr(edu.rank)}" placeholder="例如: 前5% 或 3/120">
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>学校名称</label>
-          <input type="text" class="edu-school" data-id="${edu.id}" value="${edu.school || ''}" placeholder="北京大学">
+          <label>入学时间</label>
+          <input type="text" class="edu-start" value="${attr(edu.startDate)}" placeholder="例如: 2022-09">
         </div>
         <div class="form-group">
-          <label>专业</label>
-          <input type="text" class="edu-major" data-id="${edu.id}" value="${edu.major || ''}" placeholder="计算机科学">
+          <label>毕业时间</label>
+          <input type="text" class="edu-end" value="${attr(edu.endDate)}" placeholder="例如: 2026-06 或 至今">
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>学历</label>
-          <select class="edu-degree" data-id="${edu.id}">
-            <option value="">请选择</option>
-            <option value="大专" ${edu.degree === '大专' ? 'selected' : ''}>大专</option>
-            <option value="本科" ${edu.degree === '本科' ? 'selected' : ''}>本科</option>
-            <option value="硕士" ${edu.degree === '硕士' ? 'selected' : ''}>硕士</option>
-            <option value="博士" ${edu.degree === '博士' ? 'selected' : ''}>博士</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>GPA</label>
-          <input type="text" class="edu-gpa" data-id="${edu.id}" value="${edu.gpa || ''}" placeholder="3.8/4.0">
-        </div>
+      <div class="form-group">
+        <label>主修核心课程</label>
+        <textarea class="edu-courses" rows="2" placeholder="例如: 数据结构与算法、计算机网络、操作系统、计算机体系结构、数据库原理">${html(edu.courses)}</textarea>
       </div>
     `;
     container.appendChild(card);
   });
 
-  // 绑定删除事件
-  container.querySelectorAll('.btn-delete[data-type="education"]').forEach(btn => {
-    btn.addEventListener('click', (e) => deleteEducation(e.target.getAttribute('data-id')));
+  container.querySelectorAll('.btn-delete[data-type="education"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteEducation(e.currentTarget.getAttribute('data-id')));
   });
+
+  initAllAppleSelects(container);
 }
 
-// 渲染工作经历（简化版）
 function renderWorkList(workList) {
   const container = document.getElementById('workList');
   container.innerHTML = '';
@@ -175,33 +911,67 @@ function renderWorkList(workList) {
     card.className = 'item-card';
     card.innerHTML = `
       <div class="item-card-header">
-        <h4>工作经历 ${index + 1}</h4>
-        <button class="btn-delete" data-id="${work.id}" data-type="work">删除</button>
+        <h4>工作 / 实习经历 ${index + 1}</h4>
+        <button type="button" class="btn-delete" data-id="${attr(work.id)}" data-type="work">删除经历</button>
       </div>
-      <div class="form-row">
+      <div class="form-row form-row-4">
         <div class="form-group">
-          <label>公司名称</label>
-          <input type="text" class="work-company" data-id="${work.id}" value="${work.company || ''}" placeholder="字节跳动">
+          <label>公司 / 组织名称 <span class="required">*</span></label>
+          <input type="text" class="work-company" data-id="${attr(work.id)}" value="${attr(work.company)}" placeholder="例如: 字节跳动">
         </div>
         <div class="form-group">
-          <label>职位</label>
-          <input type="text" class="work-position" data-id="${work.id}" value="${work.position || ''}" placeholder="前端开发">
+          <label>所属部门 / 业务线</label>
+          <input type="text" class="work-department" value="${attr(work.department)}" placeholder="例如: 抖音电商研发部">
+        </div>
+        <div class="form-group">
+          <label>职位名称 <span class="required">*</span></label>
+          <input type="text" class="work-position" value="${attr(work.position)}" placeholder="例如: 前端开发实习生">
+        </div>
+        <div class="form-group">
+          <label>工作性质</label>
+          <div class="select-box">
+            <select class="work-type">
+              <option value="实习" ${work.workType === '实习' || !work.workType ? 'selected' : ''}>实习</option>
+              <option value="全职" ${work.workType === '全职' ? 'selected' : ''}>全职</option>
+              <option value="兼职" ${work.workType === '兼职' ? 'selected' : ''}>兼职</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>工作城市</label>
+          <input type="text" class="work-city" value="${attr(work.city)}" placeholder="例如: 北京 / 杭州">
+        </div>
+        <div class="form-group">
+          <label>开始时间</label>
+          <input type="text" class="work-start" value="${attr(work.startDate)}" placeholder="例如: 2024-06">
+        </div>
+        <div class="form-group">
+          <label>结束时间</label>
+          <input type="text" class="work-end" value="${attr(work.endDate)}" placeholder="例如: 2024-09 或 至今">
         </div>
       </div>
       <div class="form-group">
-        <label>工作描述</label>
-        <textarea class="work-desc" data-id="${work.id}" rows="2">${work.description || ''}</textarea>
+        <label>工作职责与内容 (建议采用 STAR 原则描述)</label>
+        <textarea class="work-desc" rows="3" placeholder="负责核心模块的设计与开发，协同后端与产品快速迭代业务需求...">${html(work.description)}</textarea>
+      </div>
+      <div class="form-group">
+        <label>核心量化业务成果 / 产出贡献</label>
+        <textarea class="work-achievements" rows="2" placeholder="例如: 优化首屏加载耗时 35%，主导模块上线支撑日活 500 万+ 用户">${html(work.achievements)}</textarea>
       </div>
     `;
     container.appendChild(card);
   });
 
-  container.querySelectorAll('.btn-delete[data-type="work"]').forEach(btn => {
-    btn.addEventListener('click', (e) => deleteWorkExperience(e.target.getAttribute('data-id')));
+  container.querySelectorAll('.btn-delete[data-type="work"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteWorkExperience(e.currentTarget.getAttribute('data-id')));
   });
+
+  initAllAppleSelects(container);
 }
 
-// 渲染项目经历（简化版）
 function renderProjectList(projectList) {
   const container = document.getElementById('projectList');
   container.innerHTML = '';
@@ -211,76 +981,166 @@ function renderProjectList(projectList) {
     card.className = 'item-card';
     card.innerHTML = `
       <div class="item-card-header">
-        <h4>项目 ${index + 1}</h4>
-        <button class="btn-delete" data-id="${project.id}" data-type="project">删除</button>
+        <h4>项目经历 ${index + 1}</h4>
+        <button type="button" class="btn-delete" data-id="${attr(project.id)}" data-type="project">删除项目</button>
       </div>
-      <div class="form-row">
+      <div class="form-row form-row-3">
         <div class="form-group">
-          <label>项目名称</label>
-          <input type="text" class="proj-name" data-id="${project.id}" value="${project.name || ''}" placeholder="在线商城">
+          <label>项目名称 <span class="required">*</span></label>
+          <input type="text" class="proj-name" data-id="${attr(project.id)}" value="${attr(project.name)}" placeholder="例如: 高性能在线协同文档系统">
         </div>
         <div class="form-group">
           <label>担任角色</label>
-          <input type="text" class="proj-role" data-id="${project.id}" value="${project.role || ''}" placeholder="前端负责人">
+          <input type="text" class="proj-role" value="${attr(project.role)}" placeholder="例如: 核心前端负责人 / 独立开发者">
+        </div>
+        <div class="form-group">
+          <label>项目类型</label>
+          <div class="select-box">
+            <select class="proj-type">
+              <option value="商业项目" ${project.projectType === '商业项目' ? 'selected' : ''}>商业项目</option>
+              <option value="科研课题" ${project.projectType === '科研课题' ? 'selected' : ''}>科研课题</option>
+              <option value="竞赛获奖" ${project.projectType === '竞赛获奖' ? 'selected' : ''}>竞赛获奖</option>
+              <option value="开源项目" ${project.projectType === '开源项目' ? 'selected' : ''}>开源项目</option>
+              <option value="课程设计" ${project.projectType === '课程设计' ? 'selected' : ''}>课程设计</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>技术栈 / 关键技术</label>
+          <input type="text" class="proj-tech" value="${attr(project.techStack || (Array.isArray(project.technologies) ? project.technologies.join(', ') : ''))}" placeholder="例如: React, TypeScript, WebRTC, Node.js">
+        </div>
+        <div class="form-group">
+          <label>开始时间</label>
+          <input type="text" class="proj-start" value="${attr(project.startDate)}" placeholder="例如: 2023-10">
+        </div>
+        <div class="form-group">
+          <label>结束时间</label>
+          <input type="text" class="proj-end" value="${attr(project.endDate)}" placeholder="例如: 2024-03 或 至今">
         </div>
       </div>
       <div class="form-group">
-        <label>项目描述</label>
-        <textarea class="proj-desc" data-id="${project.id}" rows="2">${project.description || ''}</textarea>
+        <label>项目在线链接 / Demo / GitHub</label>
+        <input type="url" class="proj-url" value="${attr(project.projectUrl)}" placeholder="https://github.com/username/project">
+      </div>
+      <div class="form-group">
+        <label>项目背景与功能描述</label>
+        <textarea class="proj-desc" rows="2" placeholder="简要描述项目的业务场景与要解决的核心痛点...">${html(project.description)}</textarea>
+      </div>
+      <div class="form-group">
+        <label>个人职责与技术难点攻坚</label>
+        <textarea class="proj-resp" rows="2" placeholder="负责 OT 协同算法的设计与实现，解决高并发网络抖动冲突问题...">${html(project.responsibilities)}</textarea>
+      </div>
+      <div class="form-group">
+        <label>项目产出与成果量化</label>
+        <textarea class="proj-achieve" rows="2" placeholder="例如: 荣获全国大学生计算机设计大赛一等奖，系统上线稳定支撑 10w+ 用户访问">${html(project.achievements)}</textarea>
       </div>
     `;
     container.appendChild(card);
   });
 
-  container.querySelectorAll('.btn-delete[data-type="project"]').forEach(btn => {
-    btn.addEventListener('click', (e) => deleteProject(e.target.getAttribute('data-id')));
+  container.querySelectorAll('.btn-delete[data-type="project"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteProject(e.currentTarget.getAttribute('data-id')));
   });
+
+  initAllAppleSelects(container);
 }
 
-// 渲染技能列表
+function renderAwardsList(awardsList) {
+  const container = document.getElementById('awardsList');
+  if (!container) return;
+  container.innerHTML = '';
+
+  awardsList.forEach((award, index) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML = `
+      <div class="item-card-header">
+        <h4>荣誉奖项 ${index + 1}</h4>
+        <button type="button" class="btn-delete" data-id="${attr(award.id)}" data-type="award">删除奖项</button>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group">
+          <label>奖项 / 竞赛全称 <span class="required">*</span></label>
+          <input type="text" class="award-name" data-id="${attr(award.id)}" value="${attr(award.name)}" placeholder="例如: 国家奖学金 / ACM-ICPC 区域赛金奖">
+        </div>
+        <div class="form-group">
+          <label>获奖级别</label>
+          <div class="select-box">
+            <select class="award-level">
+              <option value="国家级" ${award.level === '国家级' ? 'selected' : ''}>国家级</option>
+              <option value="省部级" ${award.level === '省部级' ? 'selected' : ''}>省部级</option>
+              <option value="校级" ${award.level === '校级' || !award.level ? 'selected' : ''}>校级</option>
+              <option value="院系级" ${award.level === '院系级' ? 'selected' : ''}>院系级</option>
+              <option value="企业级/行业级" ${award.level === '企业级/行业级' ? 'selected' : ''}>企业级/行业级</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>获奖时间</label>
+          <input type="text" class="award-date" value="${attr(award.date)}" placeholder="例如: 2024-11">
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  container.querySelectorAll('.btn-delete[data-type="award"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteAward(e.currentTarget.getAttribute('data-id')));
+  });
+
+  initAllAppleSelects(container);
+}
+
 function renderSkillsList(skills) {
   const container = document.getElementById('skillsList');
   container.innerHTML = '';
-
-  skills.forEach(skill => {
+  (skills || []).forEach((skill) => {
     const tag = document.createElement('div');
     tag.className = 'tag';
-    tag.innerHTML = `${skill}<span class="tag-remove" data-skill="${skill}">×</span>`;
+    tag.innerHTML = `${html(skill)}<span class="tag-remove" data-skill="${attr(skill)}">×</span>`;
     container.appendChild(tag);
   });
-
-  container.querySelectorAll('.tag-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => removeSkill(e.target.getAttribute('data-skill')));
+  container.querySelectorAll('.tag-remove').forEach((btn) => {
+    btn.addEventListener('click', (e) => removeSkill(e.currentTarget.getAttribute('data-skill')));
   });
 }
 
-// ============================================================================
-// 事件绑定
-// ============================================================================
-
 function bindEvents() {
-  // 资料切换
-  document.getElementById('profileSelect').addEventListener('change', async (e) => {
-    const profileId = e.target.value;
-    await switchProfile(profileId);
+  document.getElementById('navProfileDropdownBtn')?.addEventListener('click', toggleNavCustomDropdown);
+  document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('navProfileDropdown');
+    if (dropdown && !dropdown.contains(e.target)) {
+      closeNavCustomDropdown();
+    }
+    if (!e.target.closest('.apple-custom-select-box')) {
+      document.querySelectorAll('.apple-custom-select-box.is-open').forEach((b) => b.classList.remove('is-open'));
+    }
   });
 
-  // 新增资料
+  document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
+    await switchProfile(e.target.value);
+  });
+  document.getElementById('renameProfileBtn')?.addEventListener('click', renameCurrentProfile);
   document.getElementById('addProfileBtn').addEventListener('click', addNewProfile);
-
-  // 保存按钮（两个）
-  document.getElementById('saveBtn').addEventListener('click', saveProfile);
-  document.getElementById('saveBtn2').addEventListener('click', saveProfile);
-
-  // 删除资料
+  document.getElementById('saveBtn').addEventListener('click', () => saveProfile());
+  document.getElementById('saveBtn2').addEventListener('click', () => saveProfile());
+  document.getElementById('sidebarSaveBtn')?.addEventListener('click', () => saveProfile());
   document.getElementById('deleteProfileBtn').addEventListener('click', deleteCurrentProfile);
+  document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
+  initSidebarNav();
 
-  // 添加教育/工作/项目
   document.getElementById('addEducationBtn').addEventListener('click', () => addEducation());
   document.getElementById('addWorkBtn').addEventListener('click', () => addWorkExperience());
   document.getElementById('addProjectBtn').addEventListener('click', () => addProject());
+  const addAwardBtn = document.getElementById('addAwardBtn');
+  if (addAwardBtn) {
+    addAwardBtn.addEventListener('click', () => addAward());
+  }
 
-  // 技能输入
   document.getElementById('skillInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -288,77 +1148,299 @@ function bindEvents() {
     }
   });
 
-  // 模板按钮
-  document.querySelectorAll('.btn-template').forEach(btn => {
+  document.querySelectorAll('.btn-template').forEach((btn) => {
     btn.addEventListener('click', (e) => loadIntroductionTemplate(e.target.getAttribute('data-template')));
   });
 
-  // 简历上传
-  document.getElementById('uploadResumeBtn').addEventListener('click', () => {
-    document.getElementById('resumeFile').click();
-  });
-
-  document.getElementById('resumeFile').addEventListener('change', handleResumeUpload);
-
-  // AI解析简历文本
+  const removeAttachmentBtn = document.getElementById('removeResumeFileBtn');
+  if (removeAttachmentBtn) {
+    removeAttachmentBtn.addEventListener('click', () => {
+      if (currentProfile) {
+        currentProfile.resumeFile = null;
+        currentProfile.resumeFileName = '';
+      }
+      clearSelectedAiResumeFile();
+      updateResumeAttachmentUI('', 0);
+      debouncedSave();
+      showToast('已移除简历源文件附件', 'info');
+    });
+  }
   document.getElementById('parseTextBtn').addEventListener('click', parseResumeText);
 
-  // AI设置切换
+  // HR 打招呼语事件监听
+  const greetingTextEl = document.getElementById('hrGreetingText');
+  if (greetingTextEl) {
+    greetingTextEl.addEventListener('input', (e) => {
+      updateGreetingCharCount(e.target.value);
+      debouncedSave();
+    });
+  }
+
+  const copyGreetingBtn = document.getElementById('copyGreetingBtn');
+  if (copyGreetingBtn) {
+    copyGreetingBtn.addEventListener('click', async () => {
+      const text = document.getElementById('hrGreetingText')?.value.trim();
+      if (!text) {
+        showToast('打招呼语为空，请先点击「AI 重新生成」或上传简历', 'warning');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('✅ 打招呼语已复制，可直接发送给 HR！', 'success');
+      } catch (e) {
+        showToast('复制失败，请手动选中文本复制', 'error');
+      }
+    });
+  }
+
+  const regenerateGreetingBtn = document.getElementById('regenerateGreetingBtn');
+  if (regenerateGreetingBtn) {
+    regenerateGreetingBtn.addEventListener('click', async () => {
+      const btn = regenerateGreetingBtn;
+      const resp = await sendMessage({ action: 'getSettings' });
+      const settings = resp?.settings || {};
+      if (!settings.aiEnabled || !settings.aiApiKey) {
+        showToast('请先在上方启用 AI 并填写 API Key', 'warning');
+        return;
+      }
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner-ring" style="width:12px;height:12px;border-width:2px;display:inline-block;"></div><span>生成中...</span>';
+      showToast('正在提炼高转化 HR 打招呼自荐语...', 'info');
+
+      try {
+        const profileData = collectProfileUpdates();
+        const rawText = document.getElementById('resumeText')?.value.trim();
+        const inputData = (rawText && rawText.length > 50) ? rawText : profileData;
+        const greeting = await resumeParser.generateHrGreeting(inputData, settings);
+
+        const targetEl = document.getElementById('hrGreetingText');
+        if (targetEl) {
+          targetEl.value = greeting;
+          updateGreetingCharCount(greeting);
+        }
+        if (currentProfile) {
+          currentProfile.hrGreeting = greeting;
+        }
+        await saveProfile({ silent: true });
+        showToast('✅ HR 打招呼语已重新生成并保存！', 'success');
+      } catch (err) {
+        console.error('[生成打招呼语失败]:', err);
+        showToast(`❌ 生成失败: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    });
+  }
+
+  const aiUploadBtn = document.getElementById('aiUploadBtn');
+  const aiResumeFile = document.getElementById('aiResumeFile');
+  if (aiUploadBtn && aiResumeFile) {
+    aiUploadBtn.addEventListener('click', () => aiResumeFile.click());
+    aiResumeFile.addEventListener('change', handleAiFileImport);
+  }
+  const resumeText = document.getElementById('resumeText');
+  if (resumeText) {
+    resumeText.addEventListener('input', () => {
+      if (!selectedAiResumeFile) return;
+      selectedAiResumeFile = null;
+      if (aiResumeFile) aiResumeFile.value = '';
+      setAiFileStatus('已切换为粘贴文本模式，将直接解析下方文字。', 'text');
+    });
+  }
+
   document.getElementById('aiEnabled').addEventListener('change', (e) => {
     document.getElementById('aiSettings').style.display = e.target.checked ? 'block' : 'none';
-    // 自动保存AI设置
     autoSaveAiSettings();
-  });
-
-  // AI提供商变更时自动保存
-  document.getElementById('aiProvider').addEventListener('change', autoSaveAiSettings);
-
-  // API Key变更时自动保存（延迟保存，避免频繁IO）
-  let aiKeySaveTimer = null;
-  document.getElementById('aiApiKey').addEventListener('input', () => {
-    clearTimeout(aiKeySaveTimer);
-    aiKeySaveTimer = setTimeout(autoSaveAiSettings, 1000); // 1秒后保存
-  });
-
-  // API URL变更时自动保存
-  let aiUrlSaveTimer = null;
-  document.getElementById('aiApiUrl').addEventListener('input', () => {
-    clearTimeout(aiUrlSaveTimer);
-    aiUrlSaveTimer = setTimeout(autoSaveAiSettings, 1000);
-  });
-
-  // 测试AI连接
-  document.getElementById('testAiBtn').addEventListener('click', testAiConnection);
-}
-
-// ============================================================================
-// 核心功能（复用popup.js的逻辑，简化实现）
-// ============================================================================
-
-async function switchProfile(profileId) {
-  chrome.runtime.sendMessage({ action: 'setActiveProfile', profileId }, async (response) => {
-    if (response.success) {
-      await loadProfiles();
-      showToast('已切换资料', 'success');
+    if (e.target.checked && document.getElementById('aiApiKey').value.trim()) {
+      refreshModelList({ silent: true });
     }
   });
+  document.getElementById('aiProvider').addEventListener('change', async () => {
+    populateModelSelect([], '');
+    document.getElementById('aiModelCustom').value = '';
+    setModelHint('提供商已切换，请重新获取可用模型');
+    await autoSaveAiSettings();
+    if (document.getElementById('aiApiKey').value.trim()) {
+      refreshModelList({ silent: true });
+    }
+  });
+  document.getElementById('aiApiKey').addEventListener('input', () => {
+    clearTimeout(aiKeySaveTimer);
+    aiKeySaveTimer = setTimeout(async () => {
+      await autoSaveAiSettings();
+      const key = document.getElementById('aiApiKey').value.trim();
+      if (key.length >= 16) refreshModelList({ silent: true });
+    }, 600);
+  });
+  document.getElementById('aiApiUrl').addEventListener('input', () => {
+    clearTimeout(aiUrlSaveTimer);
+    aiUrlSaveTimer = setTimeout(async () => {
+      await autoSaveAiSettings();
+      if (document.getElementById('aiApiKey').value.trim()) {
+        refreshModelList({ silent: true });
+      }
+    }, 600);
+  });
+  document.getElementById('aiModel').addEventListener('change', async () => {
+    syncCustomModelVisibility();
+    await autoSaveAiSettings();
+  });
+  document.getElementById('aiModelCustom').addEventListener('input', () => {
+    clearTimeout(aiModelSaveTimer);
+    aiModelSaveTimer = setTimeout(autoSaveAiSettings, 400);
+  });
+  document.getElementById('refreshModelsBtn').addEventListener('click', () => refreshModelList());
+  document.getElementById('testAiBtn').addEventListener('click', testAiConnection);
+  document.getElementById('testOcrBtn')?.addEventListener('click', testOcrConnection);
+
+  document.getElementById('ocrApiKey').addEventListener('input', scheduleOcrSettingsSave);
+}
+
+async function switchProfile(profileId) {
+  const response = await sendMessage({ action: 'setActiveProfile', profileId });
+  if (response.success) {
+    clearSelectedAiResumeFile();
+    await loadProfiles();
+    showToast('已切换资料', 'success');
+  }
 }
 
 async function addNewProfile() {
-  const name = prompt('请输入新资料名称:', '新资料');
-  if (!name) return;
-
-  chrome.runtime.sendMessage({ action: 'addProfile', name }, async (response) => {
-    if (response.success) {
-      await loadProfiles();
-      showToast('新资料已创建', 'success');
-    }
+  const name = await showApplePrompt({
+    title: '新建简历资料档案',
+    subtitle: '为新的求职方向创建独立资料卡（如：前端开发 / 算法岗 / 英文专版）',
+    defaultValue: `资料 ${allProfiles.length + 1}`,
+    placeholder: '请输入新资料名称',
+    confirmText: '创建资料'
   });
+  if (!name || !name.trim()) return;
+  const response = await sendMessage({ action: 'addProfile', name: name.trim() });
+  if (response.success) {
+    clearSelectedAiResumeFile();
+    await loadProfiles();
+    showToast('新资料已创建', 'success');
+  }
 }
 
-async function saveProfile() {
-  // 收集表单数据
-  const updates = {
+async function renameCurrentProfile() {
+  if (!currentProfile) {
+    showToast('当前没有选中的资料', 'warning');
+    return;
+  }
+  const oldName = currentProfile.name || '默认资料';
+  const newName = await showApplePrompt({
+    title: '重命名当前资料档案',
+    subtitle: '修改此份简历的名称，便于在投递不同岗位时快速识别',
+    defaultValue: oldName,
+    placeholder: '例如：前端开发版 / 字节跳动专版 / 英文外企版',
+    confirmText: '保存修改'
+  });
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    showToast('资料档案名称不能为空', 'warning');
+    return;
+  }
+  if (trimmed === oldName) return;
+
+  const response = await sendMessage({
+    action: 'updateProfile',
+    profileId: activeProfileId,
+    updates: { name: trimmed }
+  });
+
+  if (response && response.success) {
+    currentProfile.name = trimmed;
+    const select = document.getElementById('profileSelect');
+    if (select) {
+      const option = select.querySelector(`option[value="${activeProfileId}"]`);
+      if (option) option.textContent = trimmed;
+    }
+    renderNavCustomDropdown();
+    showToast(`✅ 资料档案已重命名为: 「${trimmed}」`, 'success');
+  } else {
+    showToast('重命名失败，请重试', 'error');
+  }
+}
+
+function collectEducationData() {
+  const education = [];
+  document.querySelectorAll('#educationList .item-card').forEach((card) => {
+    education.push({
+      id: card.querySelector('.edu-school').getAttribute('data-id') || generateId(),
+      school: card.querySelector('.edu-school').value.trim(),
+      college: card.querySelector('.edu-college')?.value.trim() || '',
+      major: card.querySelector('.edu-major').value.trim(),
+      degree: card.querySelector('.edu-degree').value,
+      degreeType: card.querySelector('.edu-degree-type')?.value || '普通全日制统招',
+      gpa: card.querySelector('.edu-gpa').value.trim(),
+      rank: card.querySelector('.edu-rank')?.value.trim() || '',
+      startDate: card.querySelector('.edu-start')?.value.trim() || '',
+      endDate: card.querySelector('.edu-end')?.value.trim() || '',
+      courses: card.querySelector('.edu-courses')?.value.trim() || ''
+    });
+  });
+  return education;
+}
+
+function collectWorkData() {
+  const work = [];
+  document.querySelectorAll('#workList .item-card').forEach((card) => {
+    work.push({
+      id: card.querySelector('.work-company').getAttribute('data-id') || generateId(),
+      company: card.querySelector('.work-company').value.trim(),
+      department: card.querySelector('.work-department')?.value.trim() || '',
+      position: card.querySelector('.work-position').value.trim(),
+      workType: card.querySelector('.work-type')?.value || '实习',
+      city: card.querySelector('.work-city')?.value.trim() || '',
+      startDate: card.querySelector('.work-start')?.value.trim() || '',
+      endDate: card.querySelector('.work-end')?.value.trim() || '',
+      description: card.querySelector('.work-desc').value.trim(),
+      achievements: card.querySelector('.work-achievements')?.value.trim() || ''
+    });
+  });
+  return work;
+}
+
+function collectProjectData() {
+  const projects = [];
+  document.querySelectorAll('#projectList .item-card').forEach((card) => {
+    const tech = card.querySelector('.proj-tech')?.value.trim() || '';
+    projects.push({
+      id: card.querySelector('.proj-name').getAttribute('data-id') || generateId(),
+      name: card.querySelector('.proj-name').value.trim(),
+      role: card.querySelector('.proj-role').value.trim(),
+      projectType: card.querySelector('.proj-type')?.value || '商业项目',
+      techStack: tech,
+      technologies: tech ? tech.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : [],
+      startDate: card.querySelector('.proj-start')?.value.trim() || '',
+      endDate: card.querySelector('.proj-end')?.value.trim() || '',
+      projectUrl: card.querySelector('.proj-url')?.value.trim() || '',
+      description: card.querySelector('.proj-desc').value.trim(),
+      responsibilities: card.querySelector('.proj-resp')?.value.trim() || '',
+      achievements: card.querySelector('.proj-achieve')?.value.trim() || ''
+    });
+  });
+  return projects;
+}
+
+function collectAwardsData() {
+  const awards = [];
+  document.querySelectorAll('#awardsList .item-card').forEach((card) => {
+    awards.push({
+      id: card.querySelector('.award-name').getAttribute('data-id') || generateId(),
+      name: card.querySelector('.award-name').value.trim(),
+      level: card.querySelector('.award-level')?.value || '校级',
+      date: card.querySelector('.award-date')?.value.trim() || ''
+    });
+  });
+  return awards;
+}
+
+function collectProfileUpdates() {
+  return {
     basicInfo: {
       fullName: document.getElementById('fullName').value.trim(),
       firstName: document.getElementById('firstName').value.trim(),
@@ -368,160 +1450,181 @@ async function saveProfile() {
       gender: document.getElementById('gender').value,
       birthDate: document.getElementById('birthDate').value,
       idCard: document.getElementById('idCard').value.trim(),
-
-      // 地址信息
+      politicalStatus: document.getElementById('politicalStatus')?.value || '',
+      ethnicity: document.getElementById('ethnicity')?.value.trim() || '',
+      hometown: document.getElementById('hometown')?.value.trim() || '',
+      graduationDate: document.getElementById('graduationDate')?.value.trim() || '',
+      emergencyContact: document.getElementById('emergencyContact')?.value.trim() || '',
+      emergencyRelation: document.getElementById('emergencyRelation')?.value.trim() || '',
+      emergencyPhone: document.getElementById('emergencyPhone')?.value.trim() || '',
       city: document.getElementById('city').value.trim(),
       state: document.getElementById('state').value.trim(),
       country: document.getElementById('country').value.trim(),
       zipCode: document.getElementById('zipCode').value.trim(),
       street: document.getElementById('street').value.trim(),
-
-      // 社交链接
       linkedin: document.getElementById('linkedin').value.trim(),
       github: document.getElementById('github').value.trim(),
       website: document.getElementById('website').value.trim(),
       twitter: document.getElementById('twitter').value.trim()
     },
+    jobIntention: {
+      expectedCity: document.getElementById('expectedCity')?.value.trim() || '',
+      expectedPosition: document.getElementById('expectedPosition')?.value.trim() || '',
+      expectedSalary: document.getElementById('expectedSalary')?.value.trim() || '',
+      availableDate: document.getElementById('availableDate')?.value.trim() || '',
+      referralCode: document.getElementById('referralCode')?.value.trim() || ''
+    },
+    languageSkills: {
+      cet4: document.getElementById('cet4')?.value.trim() || '',
+      cet6: document.getElementById('cet6')?.value.trim() || '',
+      ielts: document.getElementById('ielts')?.value.trim() || '',
+      toefl: document.getElementById('toefl')?.value.trim() || '',
+      otherLanguages: document.getElementById('otherLanguages')?.value.trim() || ''
+    },
+    awards: collectAwardsData(),
     education: collectEducationData(),
     workExperience: collectWorkData(),
     projects: collectProjectData(),
-    skills: currentProfile.skills,
+    skills: currentProfile?.skills || [],
     introTemplates: {
       default: document.getElementById('introduction').value.trim()
     },
-    resumeFile: currentProfile.resumeFile,
-    resumeFileName: currentProfile.resumeFileName
+    hrGreeting: document.getElementById('hrGreetingText')?.value.trim() || '',
+    resumeFile: currentProfile?.resumeFile || null,
+    resumeFileName: currentProfile?.resumeFileName || ''
   };
+}
 
-  // 收集AI设置
-  const settings = {
-    aiEnabled: document.getElementById('aiEnabled').checked,
-    aiProvider: document.getElementById('aiProvider').value,
-    aiApiKey: document.getElementById('aiApiKey').value.trim(),
-    aiApiUrl: document.getElementById('aiApiUrl').value.trim()
-  };
+function debouncedSave() {
+  clearTimeout(profileSaveTimer);
+  profileSaveTimer = setTimeout(() => {
+    saveProfile({ silent: true }).catch((error) => {
+      console.error('[自动保存] 失败:', error);
+    });
+  }, 600);
+}
 
-  // 保存资料
-  chrome.runtime.sendMessage({
-    action: 'updateProfile',
-    profileId: activeProfileId,
-    updates
-  }, (response1) => {
-    // 保存AI设置
-    chrome.runtime.sendMessage({
+async function saveProfile({ silent = false } = {}) {
+  if (!activeProfileId) {
+    if (!silent) showToast('没有可保存的资料', 'error');
+    return false;
+  }
+
+  const updates = collectProfileUpdates();
+  const settings = collectAiSettingsFromDom();
+
+  try {
+    const response1 = await sendMessage({
+      action: 'updateProfile',
+      profileId: activeProfileId,
+      updates
+    });
+    const response2 = await sendMessage({
       action: 'updateSettings',
       settings
-    }, (response2) => {
-      if (response1.success && response2.success) {
-        showToast('保存成功', 'success');
-      } else {
-        showToast('保存失败', 'error');
-      }
     });
-  });
-}
 
-function collectEducationData() {
-  const education = [];
-  document.querySelectorAll('#educationList .item-card').forEach(card => {
-    const id = card.querySelector('.edu-school').getAttribute('data-id');
-    education.push({
-      id,
-      school: card.querySelector('.edu-school').value.trim(),
-      major: card.querySelector('.edu-major').value.trim(),
-      degree: card.querySelector('.edu-degree').value,
-      gpa: card.querySelector('.edu-gpa').value.trim()
-    });
-  });
-  return education;
-}
+    if (response1.success && response2.success) {
+      currentProfile = { ...(currentProfile || {}), ...updates, id: activeProfileId };
+      if (typeof appLog !== 'undefined') appLog.success('options', 'profile.save', silent ? '资料已静默保存' : '资料已保存');
+      if (!silent) showToast('资料与设置已保存', 'success');
+      return true;
+    }
 
-function collectWorkData() {
-  const work = [];
-  document.querySelectorAll('#workList .item-card').forEach(card => {
-    const id = card.querySelector('.work-company').getAttribute('data-id');
-    work.push({
-      id,
-      company: card.querySelector('.work-company').value.trim(),
-      position: card.querySelector('.work-position').value.trim(),
-      description: card.querySelector('.work-desc').value.trim()
-    });
-  });
-  return work;
-}
-
-function collectProjectData() {
-  const projects = [];
-  document.querySelectorAll('#projectList .item-card').forEach(card => {
-    const id = card.querySelector('.proj-name').getAttribute('data-id');
-    projects.push({
-      id,
-      name: card.querySelector('.proj-name').value.trim(),
-      role: card.querySelector('.proj-role').value.trim(),
-      description: card.querySelector('.proj-desc').value.trim()
-    });
-  });
-  return projects;
+    if (!silent) showToast('保存失败', 'error');
+    return false;
+  } catch (error) {
+    console.error('[保存] 失败:', error);
+    if (!silent) showToast('保存失败: ' + error.message, 'error');
+    return false;
+  }
 }
 
 function addEducation() {
-  chrome.runtime.sendMessage({ action: 'addEducation', profileId: activeProfileId }, async () => {
-    await loadProfiles();
-    showToast('已添加教育经历', 'success');
-  });
+  if (!currentProfile) return;
+  currentProfile.education = collectEducationData();
+  currentProfile.education.push(emptyEducation());
+  renderEducationList(currentProfile.education);
 }
 
-function deleteEducation(eduId) {
-  if (!confirm('确定删除？')) return;
-  chrome.runtime.sendMessage({
-    action: 'deleteEducation',
-    profileId: activeProfileId,
-    eduId
-  }, async () => {
-    await loadProfiles();
-    showToast('已删除', 'success');
+async function deleteEducation(eduId) {
+  const ok = await showAppleConfirm({
+    title: '删除教育经历',
+    subtitle: '确定要删除这条教育背景信息吗？删除后需手动重新填写',
+    confirmText: '确定删除',
+    isDanger: true
   });
+  if (!ok) return;
+  currentProfile.education = collectEducationData().filter((item) => item.id !== eduId);
+  if (currentProfile.education.length === 0) currentProfile.education.push(emptyEducation());
+  renderEducationList(currentProfile.education);
 }
 
 function addWorkExperience() {
-  chrome.runtime.sendMessage({ action: 'addWorkExperience', profileId: activeProfileId }, async () => {
-    await loadProfiles();
-  });
+  if (!currentProfile) return;
+  currentProfile.workExperience = collectWorkData();
+  currentProfile.workExperience.push(emptyWork());
+  renderWorkList(currentProfile.workExperience);
 }
 
-function deleteWorkExperience(workId) {
-  if (!confirm('确定删除？')) return;
-  chrome.runtime.sendMessage({
-    action: 'deleteWorkExperience',
-    profileId: activeProfileId,
-    workId
-  }, async () => {
-    await loadProfiles();
+async function deleteWorkExperience(workId) {
+  const ok = await showAppleConfirm({
+    title: '删除工作经历',
+    subtitle: '确定要删除这条工作/实习经历记录吗？',
+    confirmText: '确定删除',
+    isDanger: true
   });
+  if (!ok) return;
+  currentProfile.workExperience = collectWorkData().filter((item) => item.id !== workId);
+  if (currentProfile.workExperience.length === 0) currentProfile.workExperience.push(emptyWork());
+  renderWorkList(currentProfile.workExperience);
 }
 
 function addProject() {
-  chrome.runtime.sendMessage({ action: 'addProject', profileId: activeProfileId }, async () => {
-    await loadProfiles();
-  });
+  if (!currentProfile) return;
+  currentProfile.projects = collectProjectData();
+  currentProfile.projects.push(emptyProject());
+  renderProjectList(currentProfile.projects);
 }
 
-function deleteProject(projectId) {
-  if (!confirm('确定删除？')) return;
-  chrome.runtime.sendMessage({
-    action: 'deleteProject',
-    profileId: activeProfileId,
-    projectId
-  }, async () => {
-    await loadProfiles();
+async function deleteProject(projectId) {
+  const ok = await showAppleConfirm({
+    title: '删除项目经历',
+    subtitle: '确定要删除这条项目经历记录吗？',
+    confirmText: '确定删除',
+    isDanger: true
   });
+  if (!ok) return;
+  currentProfile.projects = collectProjectData().filter((item) => item.id !== projectId);
+  if (currentProfile.projects.length === 0) currentProfile.projects.push(emptyProject());
+  renderProjectList(currentProfile.projects);
+}
+
+function addAward() {
+  if (!currentProfile) return;
+  currentProfile.awards = collectAwardsData();
+  currentProfile.awards.push(emptyAward());
+  renderAwardsList(currentProfile.awards);
+}
+
+async function deleteAward(awardId) {
+  const ok = await showAppleConfirm({
+    title: '删除荣誉奖项',
+    subtitle: '确定要删除这条奖项/证书记录吗？',
+    confirmText: '确定删除',
+    isDanger: true
+  });
+  if (!ok) return;
+  currentProfile.awards = collectAwardsData().filter((item) => item.id !== awardId);
+  if (currentProfile.awards.length === 0) currentProfile.awards.push(emptyAward());
+  renderAwardsList(currentProfile.awards);
 }
 
 function addSkill() {
   const input = document.getElementById('skillInput');
   const skill = input.value.trim();
   if (!skill) return;
-
+  if (!currentProfile.skills) currentProfile.skills = [];
   if (!currentProfile.skills.includes(skill)) {
     currentProfile.skills.push(skill);
     renderSkillsList(currentProfile.skills);
@@ -530,459 +1633,1115 @@ function addSkill() {
 }
 
 function removeSkill(skill) {
-  currentProfile.skills = currentProfile.skills.filter(s => s !== skill);
+  currentProfile.skills = (currentProfile.skills || []).filter((item) => item !== skill);
   renderSkillsList(currentProfile.skills);
 }
 
 function loadIntroductionTemplate(type) {
   const templates = {
-    tech: '我是一名热爱技术的开发者，具有扎实的编程基础和良好的学习能力...',
-    product: '我是一名对产品充满热情的应届毕业生，具备良好的用户思维...',
-    ops: '我是一名热爱互联网运营的应届毕业生，具备较强的内容策划能力...'
+    tech: '热爱计算机与前沿技术，具备扎实的计算机基础与全栈项目实践经验，善于钻研技术难点，具备良好的工程规范与团队协作能力...',
+    product: '具备严密的逻辑思维与同理心，熟悉互联网产品全流程生命周期，擅长需求分析、数据洞察与跨部门沟通协同...',
+    ops: '对互联网运营充满热情，具备优秀的用户增长意识、内容策划能力与数据复盘能力，具备极强的执行力与自驱力...'
   };
   document.getElementById('introduction').value = templates[type] || '';
 }
 
-async function handleResumeUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
+function updateResumeAttachmentUI(fileName, fileSize = 0) {
+  const card = document.getElementById('resumeAttachmentCard');
+  const nameEl = document.getElementById('resumeFileName');
+  const sizeEl = document.getElementById('resumeFileSize');
+  const btnText = document.getElementById('aiUploadBtnText');
+  if (!card || !nameEl) return;
 
-  // 检查文件类型
-  const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-  if (!allowedTypes.includes(file.type)) {
-    showToast('只支持 PDF、DOC、DOCX 格式', 'error');
-    return;
+  if (fileName) {
+    card.style.display = 'flex';
+    nameEl.textContent = fileName;
+    if (sizeEl) {
+      sizeEl.textContent = fileSize ? `（${formatAiFileSize(fileSize)}）` : '';
+    }
+    if (btnText) btnText.textContent = '更换简历源文件';
+  } else {
+    card.style.display = 'none';
+    nameEl.textContent = '未上传简历文件';
+    if (sizeEl) sizeEl.textContent = '';
+    if (btnText) btnText.textContent = '上传 / 导入简历源文件';
   }
-
-  // 检查文件大小（限制5MB）
-  if (file.size > 5 * 1024 * 1024) {
-    showToast('文件大小不能超过 5MB', 'error');
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = function(event) {
-    currentProfile.resumeFile = event.target.result;
-    currentProfile.resumeFileName = file.name;
-    document.getElementById('resumeFileName').textContent = file.name;
-    showToast('简历文件已上传（用于网申填充）', 'success');
-  };
-  reader.readAsDataURL(file);
 }
 
-// AI解析简历文本
+function setAiFileStatus(message, state = 'selected') {
+  const status = document.getElementById('aiFileStatus');
+  if (!status) return;
+  status.hidden = !message;
+  status.textContent = message || '';
+  status.className = `ai-file-status is-${state}`;
+}
+
+function clearSelectedAiResumeFile({ keepStatus = false } = {}) {
+  selectedAiResumeFile = null;
+  const input = document.getElementById('aiResumeFile');
+  if (input) input.value = '';
+  if (!keepStatus) setAiFileStatus('');
+}
+
+function formatAiFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+function handleAiParseProgress(progress, button) {
+  if (!progress || !progress.message) return;
+  let state = 'text';
+  if (progress.stage === 'direct') state = 'direct';
+  if (progress.stage === 'ocr' || progress.stage === 'ocr-complete') state = 'ocr';
+  if (progress.stage === 'fallback' || progress.stage === 'ocr-fallback') state = 'fallback';
+  setAiFileStatus(progress.message, state);
+  const label = button && button.querySelector('span');
+  if (label) label.textContent = progress.message.replace(/…$/, '');
+}
+
+function handleAiFileImport(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+
+  if (!resumeParser.isSupported(file)) {
+    clearSelectedAiResumeFile();
+    showToast('不支持的文件格式，请使用 PDF / Word / 图片 / TXT / MD / LaTeX / HTML', 'error');
+    return;
+  }
+
+  selectedAiResumeFile = file;
+
+  // 自动保留源文件（用于网申页面自动上传简历附件）
+  const reader = new FileReader();
+  reader.onload = function (event) {
+    if (!currentProfile) currentProfile = {};
+    currentProfile.resumeFile = event.target.result;
+    currentProfile.resumeFileName = file.name;
+    updateResumeAttachmentUI(file.name, file.size);
+    debouncedSave();
+  };
+  reader.readAsDataURL(file);
+
+  document.getElementById('resumeText').value = '';
+  setAiFileStatus(
+    `已就绪：${file.name}（${formatAiFileSize(file.size)}），已自动绑定为网申简历附件；点击下方按钮即可一键解析。`,
+    'selected'
+  );
+  showToast(`已上传 ${file.name} 并保存为简历源文件`, 'success');
+}
+
 async function parseResumeText() {
-  const resumeText = document.getElementById('resumeText').value.trim();
-
-  if (!resumeText) {
-    showToast('请先粘贴简历内容', 'warning');
+  const resumeTextArea = document.getElementById('resumeText');
+  const resumeText = resumeTextArea.value.trim();
+  const resumeFile = selectedAiResumeFile;
+  if (!resumeFile && !resumeText) {
+    showToast('请先粘贴简历内容，或从文件导入', 'warning');
     return;
   }
 
-  // 检查AI设置
-  const settings = await getSettings();
-  if (!settings.aiEnabled || !settings.aiApiKey) {
-    showToast('请先在上方配置AI设置并测试连接', 'warning');
+  const settings = collectAiSettingsFromDom();
+  if (!settings.aiEnabled) {
+    showToast('请先勾选启用 AI 功能', 'warning');
     return;
   }
+  if (!settings.aiApiKey) {
+    showToast('请先填写 API Key', 'warning');
+    return;
+  }
+  if (!settings.aiModel) {
+    showToast('请先获取并选择模型', 'warning');
+    return;
+  }
+
+  await autoSaveAiSettings();
 
   const btn = document.getElementById('parseTextBtn');
-  const originalText = btn.textContent;
+  const originalText = btn.innerHTML;
   btn.disabled = true;
-  btn.textContent = '🤖 解析中...';
-
-  showToast('正在使用AI解析简历，请稍候（约10-30秒）...', 'info');
+  btn.innerHTML = '<div class="spinner-ring" style="width:14px;height:14px;border-width:2px;"></div><span>正在全量智能解析简历...</span>';
+  showToast('正在解析简历，请稍候...', 'info');
+  if (typeof appLog !== 'undefined') {
+    appLog.info('options', 'parse.click', resumeFile ? `开始解析文件 ${resumeFile.name}` : '开始解析粘贴文本');
+  }
 
   try {
-    console.log('[AI解析] 开始解析，文本长度:', resumeText.length);
-    console.log('[AI解析] 使用提供商:', settings.aiProvider);
+    let parsedData;
+    let parseResult = null;
+    if (resumeFile) {
+      parseResult = await resumeParser.parseFileWithAI(resumeFile, settings, {
+        fallbackText: resumeText,
+        onProgress: (progress) => handleAiParseProgress(progress, btn)
+      });
+      parsedData = parseResult.data;
 
-    // 直接调用AI解析
-    const parsedData = await resumeParser.parseWithAI(resumeText, settings);
-
-    console.log('[AI解析] AI返回数据:', parsedData);
-
-    if (!parsedData) {
-      throw new Error('AI未返回数据');
+      if (parseResult.inputMode === 'text') {
+        resumeTextArea.value = parseResult.extractedText || '';
+        clearSelectedAiResumeFile({ keepStatus: true });
+        const usedOcr = parseResult.extractionMode === 'ocr';
+        setAiFileStatus(
+          usedOcr
+            ? `${parseResult.fileName} 已用 OCR 识别后再解析；识别文字已保留。`
+            : `${parseResult.fileName} 已用本地抽取文字再解析；提取文字已保留。`,
+          usedOcr ? 'ocr' : 'fallback'
+        );
+      } else {
+        setAiFileStatus(`${parseResult.fileName} 已由当前模型直接读取。`, 'direct');
+      }
+    } else {
+      parsedData = await resumeParser.parseWithAI(resumeText, settings);
     }
 
-    // 填充解析结果
-    console.log('[AI解析] 开始填充数据到表单...');
-    await fillParsedData(parsedData);
-
-    console.log('[AI解析] 填充完成，准备保存...');
-    console.log('[AI解析] 保存前currentProfile:', currentProfile);
-
-    // 自动保存
-    await saveProfile();
-
-    console.log('[AI解析] 保存完成');
-
-    showToast('✅ AI解析成功！数据已自动保存', 'success');
-
-    // 清空文本框
-    document.getElementById('resumeText').value = '';
-
+    fillParsedData(parsedData);
+    const saved = await saveProfile({ silent: true });
+    if (saved) {
+      const modeText = parseResult?.inputMode === 'file'
+        ? '模型已直接读取原始文件'
+        : parseResult?.extractionMode === 'ocr'
+          ? 'OCR 识别后由文本模型解析完成'
+        : parseResult?.inputMode === 'text'
+          ? '已自动回退本地文字解析'
+          : '文字解析完成';
+      showToast(`✅ ${modeText}，已写入表单并保存`, 'success');
+      if (typeof appLog !== 'undefined') appLog.success('options', 'parse.save', modeText + '，已保存');
+    } else {
+      showToast('解析已写入表单，但保存失败，请再点保存', 'warning');
+      if (typeof appLog !== 'undefined') appLog.warn('options', 'parse.save', '解析已写入表单，但保存失败');
+    }
   } catch (error) {
     console.error('[AI解析] 失败:', error);
-    console.error('[AI解析] 错误堆栈:', error.stack);
+    if (typeof appLog !== 'undefined') appLog.error('options', 'parse.fail', '解析失败', error.message);
+    if (resumeFile) setAiFileStatus(`解析失败：${error.message}`, 'error');
     showToast(`❌ 解析失败: ${error.message}`, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = originalText;
+    btn.innerHTML = originalText;
   }
 }
 
-// 获取AI设置
-async function getSettings() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
-      if (response && response.success) {
-        resolve(response.settings);
-      } else {
-        resolve({});
-      }
-    });
-  });
-}
-
-// AI解析简历文件（旧方法，暂时禁用）
-async function parseResume() {
-  showToast('暂不支持直接解析PDF/Word文件。请复制简历内容到上方文本框后点击解析。', 'warning');
-}
-
-// 填充AI解析的数据
-async function fillParsedData(data) {
-  console.log('[AI解析] 开始填充数据:', data);
-  console.log('[AI解析] currentProfile:', currentProfile);
-
+function fillParsedData(data) {
+  if (!currentProfile) {
+    throw new Error('当前没有资料，请先创建一份');
+  }
   if (!data || typeof data !== 'object') {
-    console.error('[AI解析] 数据格式错误:', data);
-    throw new Error('AI返回的数据格式不正确');
+    throw new Error('AI 返回的数据格式不正确');
   }
 
-  // 填充基础信息到currentProfile
-  if (data.basicInfo) {
-    console.log('[AI解析] 填充基础信息');
-    const bi = data.basicInfo;
-
-    // 逐个字段填充并打印日志
-    if (bi.fullName) {
-      console.log('[AI解析] 姓名:', bi.fullName);
-      const elem = document.getElementById('fullName');
-      if (elem) {
-        elem.value = bi.fullName;
-        currentProfile.basicInfo.fullName = bi.fullName;
-      } else {
-        console.error('[AI解析] 找不到fullName元素');
-      }
+  currentProfile.basicInfo = currentProfile.basicInfo || {};
+  const bi = data.basicInfo || {};
+  const basicFields = [
+    'fullName', 'firstName', 'lastName', 'phone', 'email', 'gender',
+    'politicalStatus', 'ethnicity', 'hometown', 'graduationDate',
+    'emergencyContact', 'emergencyRelation', 'emergencyPhone',
+    'city', 'state', 'country', 'zipCode', 'street',
+    'linkedin', 'github', 'website', 'twitter'
+  ];
+  basicFields.forEach((key) => {
+    if (bi[key]) {
+      setInputValue(key, bi[key]);
+      currentProfile.basicInfo[key] = bi[key];
     }
-
-    if (bi.firstName) {
-      console.log('[AI解析] 名:', bi.firstName);
-      document.getElementById('firstName').value = bi.firstName;
-      currentProfile.basicInfo.firstName = bi.firstName;
-    }
-
-    if (bi.lastName) {
-      console.log('[AI解析] 姓:', bi.lastName);
-      document.getElementById('lastName').value = bi.lastName;
-      currentProfile.basicInfo.lastName = bi.lastName;
-    }
-
-    if (bi.phone) {
-      console.log('[AI解析] 手机:', bi.phone);
-      document.getElementById('phone').value = bi.phone;
-      currentProfile.basicInfo.phone = bi.phone;
-    }
-
-    if (bi.email) {
-      console.log('[AI解析] 邮箱:', bi.email);
-      document.getElementById('email').value = bi.email;
-      currentProfile.basicInfo.email = bi.email;
-    }
-
-    if (bi.gender) {
-      document.getElementById('gender').value = bi.gender;
-      currentProfile.basicInfo.gender = bi.gender;
-    }
-
-    if (bi.birthDate) {
-      document.getElementById('birthDate').value = bi.birthDate;
-      currentProfile.basicInfo.birthDate = bi.birthDate;
-    }
-
-    if (bi.city) {
-      document.getElementById('city').value = bi.city;
-      currentProfile.basicInfo.city = bi.city;
-    }
-
-    if (bi.state) {
-      document.getElementById('state').value = bi.state;
-      currentProfile.basicInfo.state = bi.state;
-    }
-
-    if (bi.linkedin) {
-      document.getElementById('linkedin').value = bi.linkedin;
-      currentProfile.basicInfo.linkedin = bi.linkedin;
-    }
-
-    if (bi.github) {
-      document.getElementById('github').value = bi.github;
-      currentProfile.basicInfo.github = bi.github;
-    }
-
-    if (bi.website) {
-      document.getElementById('website').value = bi.website;
-      currentProfile.basicInfo.website = bi.website;
-    }
-
-    console.log('[AI解析] 基础信息填充完成');
-  }
-
-  // 填充教育经历
-  if (data.education && data.education.length > 0) {
-    console.log('[AI解析] 填充教育经历，数量:', data.education.length);
-    const validEducation = data.education.filter(edu => edu.school || edu.major);
-
-    if (validEducation.length > 0) {
-      console.log('[AI解析] 有效教育经历:', validEducation.length);
-
-      // 清空现有的，从第一个开始
-      // 如果已有教育经历，使用第一个，否则添加
-      for (let i = 0; i < validEducation.length; i++) {
-        if (i >= currentProfile.education.length) {
-          console.log('[AI解析] 添加新教育经历', i + 1);
-          await chrome.runtime.sendMessage({ action: 'addEducation', profileId: activeProfileId });
-          await new Promise(resolve => setTimeout(resolve, 100));
-          await loadProfiles(); // 重新加载获取新添加的
-        }
-      }
-
-      // 填充数据
-      validEducation.forEach((edu, index) => {
-        if (currentProfile.education[index]) {
-          console.log('[AI解析] 填充教育', index + 1, ':', edu.school, edu.major);
-          Object.assign(currentProfile.education[index], edu);
-        }
-      });
-
-      // 重新渲染
-      console.log('[AI解析] 重新渲染教育列表');
-      renderEducationList(currentProfile.education);
+  });
+  if (bi.birthDate) {
+    const birth = toDateInput(bi.birthDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(birth)) {
+      document.getElementById('birthDate').value = birth;
+      currentProfile.basicInfo.birthDate = birth;
     }
   }
 
-  // 填充工作经历
-  if (data.workExperience && data.workExperience.length > 0) {
-    console.log('[AI解析] 填充工作经历，数量:', data.workExperience.length);
-    const validWork = data.workExperience.filter(work => work.company || work.position);
-
-    if (validWork.length > 0) {
-      for (let i = 0; i < validWork.length; i++) {
-        if (i >= currentProfile.workExperience.length) {
-          console.log('[AI解析] 添加新工作经历', i + 1);
-          await chrome.runtime.sendMessage({ action: 'addWorkExperience', profileId: activeProfileId });
-          await new Promise(resolve => setTimeout(resolve, 100));
-          await loadProfiles();
-        }
-      }
-
-      validWork.forEach((work, index) => {
-        if (currentProfile.workExperience[index]) {
-          console.log('[AI解析] 填充工作', index + 1, ':', work.company, work.position);
-          Object.assign(currentProfile.workExperience[index], work);
-        }
-      });
-
-      console.log('[AI解析] 重新渲染工作列表');
-      renderWorkList(currentProfile.workExperience);
+  // 求职意向
+  currentProfile.jobIntention = currentProfile.jobIntention || {};
+  const ji = data.jobIntention || {};
+  ['expectedCity', 'expectedPosition', 'expectedSalary', 'availableDate', 'referralCode'].forEach(key => {
+    if (ji[key]) {
+      setInputValue(key, ji[key]);
+      currentProfile.jobIntention[key] = ji[key];
     }
+  });
+
+  // 语言能力
+  currentProfile.languageSkills = currentProfile.languageSkills || {};
+  const ls = data.languageSkills || {};
+  ['cet4', 'cet6', 'ielts', 'toefl', 'otherLanguages'].forEach(key => {
+    if (ls[key]) {
+      setInputValue(key, ls[key]);
+      currentProfile.languageSkills[key] = ls[key];
+    }
+  });
+
+  // 荣誉奖项
+  if (data.awards && data.awards.length) {
+    currentProfile.awards = data.awards.map(item => ({ ...emptyAward(), ...item, id: generateId() }));
+    renderAwardsList(currentProfile.awards);
   }
 
-  // 填充项目经历
-  if (data.projects && data.projects.length > 0) {
-    console.log('[AI解析] 填充项目经历，数量:', data.projects.length);
-    const validProjects = data.projects.filter(proj => proj.name);
-
-    if (validProjects.length > 0) {
-      for (let i = 0; i < validProjects.length; i++) {
-        if (i >= currentProfile.projects.length) {
-          console.log('[AI解析] 添加新项目', i + 1);
-          await chrome.runtime.sendMessage({ action: 'addProject', profileId: activeProfileId });
-          await new Promise(resolve => setTimeout(resolve, 100));
-          await loadProfiles();
-        }
-      }
-
-      validProjects.forEach((proj, index) => {
-        if (currentProfile.projects[index]) {
-          console.log('[AI解析] 填充项目', index + 1, ':', proj.name);
-          Object.assign(currentProfile.projects[index], proj);
-        }
-      });
-
-      console.log('[AI解析] 重新渲染项目列表');
-      renderProjectList(currentProfile.projects);
-    }
+  // 教育背景
+  if (data.education && data.education.length) {
+    currentProfile.education = data.education.map((item) => ({ ...emptyEducation(), ...item, id: generateId() }));
+    renderEducationList(currentProfile.education);
   }
 
-  // 填充技能
-  if (data.skills && data.skills.length > 0) {
-    console.log('[AI解析] 填充技能，数量:', data.skills.length);
+  // 工作经历
+  if (data.workExperience && data.workExperience.length) {
+    currentProfile.workExperience = data.workExperience.map((item) => ({ ...emptyWork(), ...item, id: generateId() }));
+    renderWorkList(currentProfile.workExperience);
+  }
+
+  // 项目经历
+  if (data.projects && data.projects.length) {
+    currentProfile.projects = data.projects.map((item) => ({ ...emptyProject(), ...item, id: generateId() }));
+    renderProjectList(currentProfile.projects);
+  }
+
+  // 技能标签
+  if (data.skills && data.skills.length) {
     currentProfile.skills = data.skills;
     renderSkillsList(currentProfile.skills);
   }
 
-  // 填充自我介绍
+  // 自我介绍
   if (data.introduction) {
-    console.log('[AI解析] 填充自我介绍');
     document.getElementById('introduction').value = data.introduction;
+    currentProfile.introTemplates = currentProfile.introTemplates || { default: '', custom: [] };
     currentProfile.introTemplates.default = data.introduction;
   }
 
-  console.log('[AI解析] 数据填充完成，currentProfile:', currentProfile);
+  // HR 打招呼语 / 简历速览
+  if (data.hrGreeting) {
+    const greetingEl = document.getElementById('hrGreetingText');
+    if (greetingEl) {
+      greetingEl.value = data.hrGreeting;
+      updateGreetingCharCount(data.hrGreeting);
+    }
+    currentProfile.hrGreeting = data.hrGreeting;
+  }
 }
 
 async function deleteCurrentProfile() {
-  if (!confirm('确定要删除当前资料吗？此操作不可恢复。')) return;
-
-  chrome.runtime.sendMessage({ action: 'deleteProfile', profileId: activeProfileId }, async (response) => {
-    if (response.success) {
-      await loadProfiles();
-      showToast('资料已删除', 'success');
-    } else {
-      showToast('至少需要保留一份资料', 'warning');
-    }
+  const ok = await showAppleConfirm({
+    title: '删除当前资料档案',
+    subtitle: `确定要删除「${currentProfile?.name || '当前资料'}」吗？此操作不可撤销`,
+    confirmText: '确定删除',
+    isDanger: true
   });
+  if (!ok) return;
+  const response = await sendMessage({ action: 'deleteProfile', profileId: activeProfileId });
+  if (response.success) {
+    clearSelectedAiResumeFile();
+    await loadProfiles();
+    showToast('资料已删除', 'success');
+  } else {
+    showToast('至少需要保留一份资料', 'warning');
+  }
 }
 
-// 自动保存AI设置（单独保存，不影响资料）
 async function autoSaveAiSettings() {
-  const settings = {
-    aiEnabled: document.getElementById('aiEnabled').checked,
-    aiProvider: document.getElementById('aiProvider').value,
-    aiApiKey: document.getElementById('aiApiKey').value.trim(),
-    aiApiUrl: document.getElementById('aiApiUrl').value.trim()
-  };
-
+  const settings = collectAiSettingsFromDom();
   console.log('[AI设置] 自动保存:', settings.aiProvider, settings.aiEnabled);
-
-  chrome.runtime.sendMessage({
-    action: 'updateSettings',
-    settings
-  }, (response) => {
-    if (response && response.success) {
-      console.log('[AI设置] 已自动保存');
-      // 静默保存，不显示Toast
-    }
-  });
+  try {
+    const response = await sendMessage({ action: 'updateSettings', settings });
+    return !!(response && response.success);
+  } catch (error) {
+    console.error('[AI设置] 自动保存失败:', error);
+    return false;
+  }
 }
 
-// 测试AI连接
 async function testAiConnection() {
-  const provider = document.getElementById('aiProvider').value;
-  const apiKey = document.getElementById('aiApiKey').value.trim();
-  const apiUrl = document.getElementById('aiApiUrl').value.trim();
-
-  if (!apiKey) {
-    showToast('请先输入API Key', 'warning');
+  const settings = collectAiSettingsFromDom();
+  if (!settings.aiApiKey) {
+    showToast('请先输入 API Key', 'warning');
     return;
   }
 
+  settings.aiEnabled = true;
+  document.getElementById('aiEnabled').checked = true;
+  document.getElementById('aiSettings').style.display = 'block';
+
+  if (!settings.aiModel) {
+    const models = await refreshModelList({ silent: true });
+    settings.aiModel = getSelectedModel() || models[0] || '';
+  }
+
+  if (!settings.aiModel) {
+    showToast('请先获取并选择模型', 'warning');
+    setModelHint('测试前需要先选出一个模型', true);
+    return;
+  }
+
+  await autoSaveAiSettings();
+
   const btn = document.getElementById('testAiBtn');
   const resultDiv = document.getElementById('testResult');
-
   btn.disabled = true;
   btn.textContent = '🔍 测试中...';
   resultDiv.style.display = 'block';
-  resultDiv.innerHTML = '<div style="color: #3b82f6;">正在连接...</div>';
-
-  console.log('[AI测试] 开始测试');
-  console.log('[AI测试] 提供商:', provider);
-  console.log('[AI测试] API Key前8位:', apiKey.substring(0, 8) + '...');
-  console.log('[AI测试] API URL:', apiUrl || '默认');
-
-  const settings = {
-    aiEnabled: true,
-    aiProvider: provider,
-    aiApiKey: apiKey,
-    aiApiUrl: apiUrl
-  };
+  resultDiv.innerHTML = '<div style="color: #818cf8;">正在连接大模型服务...</div>';
 
   try {
-    // 发送一个简单的测试请求
-    const testPrompt = '回复"OK"即可';
-
-    console.log('[AI测试] 发送测试请求...');
     const startTime = Date.now();
-
-    const result = await resumeParser.parseWithAI(testPrompt, settings);
-
+    const result = await resumeParser.testConnection(settings);
     const duration = Date.now() - startTime;
-    console.log('[AI测试] 成功，耗时:', duration + 'ms');
-    console.log('[AI测试] 返回结果:', result);
-
     btn.disabled = false;
-    btn.textContent = '🔍 测试连接';
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><span>测试连接</span>';
     resultDiv.innerHTML = `
-      <div style="background: #d1fae5; color: #065f46; padding: 10px; border-radius: 6px; border: 1px solid #10b981;">
-        <strong>✅ 连接成功！</strong><br>
-        响应时间: ${duration}ms<br>
-        可以开始使用AI解析功能
+      <div style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 12px; border-radius: 12px; border: 1px solid rgba(16, 185, 129, 0.35);">
+        <strong>✅ 接口连接成功</strong><br>
+        使用模型: ${html(result.model || settings.aiModel)}<br>
+        响应耗时: ${duration}ms<br>
+        模型回复: ${html(result.preview || 'OK')}
       </div>
     `;
     showToast('✅ AI连接测试成功', 'success');
-
   } catch (error) {
     btn.disabled = false;
-    btn.textContent = '🔍 测试连接';
-
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><span>测试连接</span>';
     console.error('[AI测试] 失败:', error);
-    console.error('[AI测试] 错误详情:', error.message);
 
-    // 分析错误类型
-    let errorType = '未知错误';
-    let suggestion = '';
-
-    if (error.message.includes('401') || error.message.includes('403') || error.message.includes('Unauthorized')) {
-      errorType = 'API Key无效';
-      suggestion = '1. 检查API Key是否正确<br>2. 确认没有多余空格<br>3. 尝试重新生成Key';
-    } else if (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('Failed to fetch')) {
+    let errorType = '请求失败';
+    let suggestion = '查看下方详细错误';
+    const message = error.message || '';
+    if (/401|403|unauthorized|invalid api key/i.test(message)) {
+      errorType = 'API Key 无效或未授权';
+      suggestion = '请检查 API Key 是否完整粘贴，前后是否有空格';
+    } else if (/failed to fetch|network|连接失败/i.test(message)) {
       errorType = '网络连接失败';
-      suggestion = '1. 检查网络连接<br>2. 尝试访问官网<br>3. 检查是否需要VPN';
-    } else if (error.message.includes('model')) {
+      suggestion = '检查网络连接，或尝试配置代理/中转 API URL';
+    } else if (/model/i.test(message)) {
       errorType = '模型不可用';
-      suggestion = '1. 切换其他提供商<br>2. 确认账号已充值<br>3. 检查模型名称';
-    } else if (error.message.includes('balance') || error.message.includes('quota')) {
-      errorType = '余额不足';
-      suggestion = '1. 登录控制台充值<br>2. DeepSeek最低10元';
+      suggestion = '点击「获取可用模型」后改选列表中的模型；豆包请选 ep- 接入点';
+    } else if (/balance|quota|额度|余额/i.test(message)) {
+      errorType = '账号余额不足';
+      suggestion = '请登录对应大模型平台控制台充值后再试';
     }
 
     resultDiv.innerHTML = `
-      <div style="background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; border: 1px solid #ef4444;">
-        <strong>❌ 连接失败：${errorType}</strong><br>
-        <div style="margin-top: 8px; font-size: 11px;">
-          ${suggestion}
-        </div>
-        <details style="margin-top: 8px;">
-          <summary style="cursor: pointer; font-size: 11px;">查看详细错误</summary>
-          <pre style="margin-top: 4px; font-size: 10px; background: #fff; padding: 4px; border-radius: 4px; overflow-x: auto;">${error.message}</pre>
+      <div style="background: rgba(239, 68, 68, 0.15); color: #f87171; padding: 12px; border-radius: 12px; border: 1px solid rgba(239, 68, 68, 0.35);">
+        <strong>❌ 连接失败：${html(errorType)}</strong><br>
+        <div style="margin-top: 6px; font-size: 11.5px;">${html(suggestion)}</div>
+        <details style="margin-top: 6px;">
+          <summary style="cursor: pointer; font-size: 11px;">查看详细错误日志</summary>
+          <pre style="margin-top: 4px; font-size: 10.5px; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap;">${html(message)}</pre>
         </details>
       </div>
     `;
-
     showToast(`❌ 测试失败: ${errorType}`, 'error');
   }
 }
 
+async function testOcrConnection() {
+  const ocrApiKey = document.getElementById('ocrApiKey')?.value.trim();
+  if (!ocrApiKey) {
+    showToast('请先输入硅基流动 API Key', 'warning');
+    return;
+  }
+
+  await autoSaveAiSettings();
+
+  const btn = document.getElementById('testOcrBtn');
+  const resultDiv = document.getElementById('testOcrResult');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner-ring" style="width:11px;height:11px;border-width:2px;"></div><span>测试中...</span>';
+  }
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div style="color: #0071e3; font-size: 12px; padding: 6px 0;">正在连接硅基流动 DeepSeek-OCR 服务...</div>';
+  }
+
+  try {
+    const startTime = Date.now();
+    const result = await resumeParser.testOcrConnection(ocrApiKey);
+    const duration = Date.now() - startTime;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><span>测试 OCR 连通性</span>';
+    }
+    if (resultDiv) {
+      resultDiv.innerHTML = `
+        <div style="background: rgba(16, 185, 129, 0.12); color: #10b981; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.25); font-size: 12px; margin-top: 8px;">
+          <strong>✅ 硅基流动 DeepSeek-OCR 连接成功</strong><br>
+          模型: ${html(result.model)} · 响应耗时: ${duration}ms
+        </div>
+      `;
+    }
+    showToast('✅ 硅基流动 OCR 服务连接成功！', 'success');
+  } catch (error) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><span>测试 OCR 连通性</span>';
+    }
+    if (resultDiv) {
+      resultDiv.innerHTML = `
+        <div style="background: rgba(239, 68, 68, 0.12); color: #ef4444; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.25); font-size: 12px; margin-top: 8px;">
+          <strong>❌ 硅基流动 OCR 连接失败</strong><br>
+          ${html(error.message)}
+        </div>
+      `;
+    }
+    showToast('OCR 连接失败，请检查 API Key', 'error');
+  }
+}
+
+let toastTimer = null;
 function showToast(message, type = 'info') {
   const toast = document.getElementById('toast');
-  toast.textContent = message;
-  toast.className = `toast ${type}`;
-  toast.style.display = 'block';
+  if (!toast) return;
+  clearTimeout(toastTimer);
 
-  setTimeout(() => {
-    toast.style.display = 'none';
-  }, 3000);
+  const rawMsg = String(message || '').trim();
+  const emojiMatch = rawMsg.match(/^([\u{1F300}-\u{1FAFF}]|[\u{2600}-\u{27BF}]|[\u{2300}-\u{23FF}])/u);
+  let iconHtml = '';
+  let displayText = rawMsg;
+
+  if (emojiMatch) {
+    iconHtml = `<span class="toast-emoji">${emojiMatch[0]}</span>`;
+    displayText = rawMsg.slice(emojiMatch[0].length).trim();
+  } else {
+    const svgs = {
+      success: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+      error: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>',
+      warning: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+      info: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
+    };
+    iconHtml = svgs[type] || svgs.info;
+  }
+
+  toast.innerHTML = `${iconHtml}<span>${html(displayText)}</span>`;
+  toast.className = `toast ${type}`;
+  toast.style.display = 'inline-flex';
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateX(-50%) translateY(0) scale(1)';
+
+  toastTimer = setTimeout(() => {
+    toast.style.transition = 'all 0.22s cubic-bezier(0.16, 1, 0.3, 1)';
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(-10px) scale(0.94)';
+    setTimeout(() => {
+      toast.style.display = 'none';
+    }, 240);
+  }, 2200);
+}
+
+function updateGreetingCharCount(text) {
+  const countEl = document.getElementById('greetingCharCount');
+  if (countEl) {
+    const len = String(text || '').length;
+    countEl.textContent = `${len} / 300 字`;
+    countEl.style.color = len > 300 ? '#ef4444' : '';
+  }
+}
+
+// ============================================================================
+// 投递历史与网申看板逻辑
+// ============================================================================
+
+let allSubmissions = [];
+let submissionFilterStatus = 'all';
+let submissionSearchQuery = '';
+
+async function loadSubmissions() {
+  try {
+    const response = await sendMessage({ action: 'getSubmissions' });
+    allSubmissions = response.success && Array.isArray(response.submissions) ? response.submissions : [];
+    updateSubmissionStats();
+    renderSubmissionsList();
+  } catch (e) {
+    console.error('[投递历史] 加载失败:', e);
+  }
+}
+
+function updateSubmissionStats() {
+  const total = allSubmissions.length;
+  const pending = allSubmissions.filter((s) => s.status === '在投').length;
+  const exam = allSubmissions.filter((s) => s.status === '笔试').length;
+  const interview = allSubmissions.filter((s) => s.status === '面试').length;
+  const offer = allSubmissions.filter((s) => s.status === 'Offer').length;
+  const rejected = allSubmissions.filter((s) => s.status === '挂了').length;
+
+  const totalEl = document.getElementById('statTotal');
+  const pendingEl = document.getElementById('statPending');
+  const examEl = document.getElementById('statExam');
+  const interviewEl = document.getElementById('statInterview');
+  const offerEl = document.getElementById('statOffer');
+  const rejectedEl = document.getElementById('statRejected');
+
+  if (totalEl) totalEl.textContent = total;
+  if (pendingEl) pendingEl.textContent = pending;
+  if (examEl) examEl.textContent = exam;
+  if (interviewEl) interviewEl.textContent = interview;
+  if (offerEl) offerEl.textContent = offer;
+  if (rejectedEl) rejectedEl.textContent = rejected;
+
+  const navKanbanCount = document.getElementById('navKanbanCount');
+  if (navKanbanCount) navKanbanCount.textContent = total;
+
+  document.querySelectorAll('.stat-card').forEach((card) => {
+    const status = card.getAttribute('data-status');
+    card.classList.toggle('active', status === submissionFilterStatus);
+  });
+}
+
+function renderSubmissionsList() {
+  const container = document.getElementById('submissionList');
+  if (!container) return;
+
+  const query = submissionSearchQuery.trim().toLowerCase();
+  const filtered = allSubmissions.filter((item) => {
+    if (submissionFilterStatus !== 'all' && item.status !== submissionFilterStatus) {
+      return false;
+    }
+    if (query) {
+      const matchCompany = (item.company || '').toLowerCase().includes(query);
+      const matchPosition = (item.position || '').toLowerCase().includes(query);
+      const matchProfile = (item.profileName || '').toLowerCase().includes(query);
+      const matchNotes = (item.notes || '').toLowerCase().includes(query);
+      if (!matchCompany && !matchPosition && !matchProfile && !matchNotes) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div class="submission-empty">
+        <div style="font-size: 28px; margin-bottom: 8px;">📬</div>
+        <div style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">暂无匹配的投递记录</div>
+        <div style="font-size: 12px;">在招聘网站点击插件「填充」时会自动提取记录，也可以点击上方「手动添加投递」</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+  filtered.forEach((sub) => {
+    const card = document.createElement('div');
+    card.className = 'submission-item-card';
+
+    const urlDisplay = sub.url ? `<a href="${attr(sub.url)}" target="_blank" rel="noreferrer" class="sub-link" title="${attr(sub.url)}">🔗 招聘网址</a>` : '';
+    const notesDisplay = sub.notes ? `<span class="sub-notes" title="${attr(sub.notes)}">📝 ${html(sub.notes)}</span>` : '';
+
+    card.innerHTML = `
+      <div class="sub-item-main">
+        <div class="sub-item-top">
+          <span class="sub-company-name">${html(sub.company || '未知企业')}</span>
+          <span class="sub-position-name">${html(sub.position || '网申岗位')}</span>
+        </div>
+        <div class="sub-item-meta">
+          <span class="sub-meta-pill">📅 ${html(sub.date || '未知日期')}</span>
+          <span class="sub-meta-pill">📄 资料: ${html(sub.profileName || '默认资料')}</span>
+          ${urlDisplay}
+          ${notesDisplay}
+        </div>
+      </div>
+      <div class="sub-item-actions">
+        <select class="status-pill-select status-${attr(sub.status || '在投')}" data-id="${attr(sub.id)}" title="切换投递状态">
+          <option value="在投" ${sub.status === '在投' ? 'selected' : ''}>在投</option>
+          <option value="笔试" ${sub.status === '笔试' ? 'selected' : ''}>笔试</option>
+          <option value="面试" ${sub.status === '面试' ? 'selected' : ''}>面试</option>
+          <option value="Offer" ${sub.status === 'Offer' ? 'selected' : ''}>Offer</option>
+          <option value="挂了" ${sub.status === '挂了' ? 'selected' : ''}>挂了</option>
+        </select>
+        <button type="button" class="btn-icon-sub btn-edit-sub" data-id="${attr(sub.id)}" title="编辑投递记录">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        </button>
+        <button type="button" class="btn-icon-sub btn-del-sub" data-id="${attr(sub.id)}" title="删除投递记录">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>
+      </div>
+    `;
+
+    // 状态选择切换
+    const statusSelect = card.querySelector('.status-pill-select');
+    statusSelect.addEventListener('change', async (e) => {
+      const newStatus = e.target.value;
+      const subId = e.target.getAttribute('data-id');
+      await updateSubmissionStatus(subId, newStatus);
+    });
+
+    // 编辑按钮
+    const editBtn = card.querySelector('.btn-edit-sub');
+    editBtn.addEventListener('click', () => {
+      const subId = editBtn.getAttribute('data-id');
+      const item = allSubmissions.find((s) => s.id === subId);
+      if (item) openSubmissionEditModal(item);
+    });
+
+    // 删除按钮
+    const delBtn = card.querySelector('.btn-del-sub');
+    delBtn.addEventListener('click', async () => {
+      const subId = delBtn.getAttribute('data-id');
+      await deleteSubmissionRecord(subId);
+    });
+
+    container.appendChild(card);
+  });
+}
+
+async function updateSubmissionStatus(id, newStatus) {
+  try {
+    const res = await sendMessage({ action: 'updateSubmission', id, updates: { status: newStatus } });
+    if (res && res.success) {
+      const target = allSubmissions.find((s) => s.id === id);
+      if (target) target.status = newStatus;
+      updateSubmissionStats();
+      renderSubmissionsList();
+      showToast(`已更新为「${newStatus}」状态`, 'success');
+    }
+  } catch (e) {
+    showToast('状态更新失败', 'error');
+  }
+}
+
+function openSubmissionEditModal(submission = null) {
+  const modal = document.getElementById('submissionEditModal');
+  if (!modal) return;
+
+  const profileSelect = document.getElementById('editSubmissionProfile');
+  profileSelect.innerHTML = '';
+  allProfiles.forEach((p) => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    profileSelect.appendChild(opt);
+  });
+
+  const titleEl = document.getElementById('submissionModalTitle');
+  const idEl = document.getElementById('editSubmissionId');
+  const compEl = document.getElementById('editSubmissionCompany');
+  const posEl = document.getElementById('editSubmissionPosition');
+  const dateEl = document.getElementById('editSubmissionDate');
+  const statusEl = document.getElementById('editSubmissionStatus');
+  const urlEl = document.getElementById('editSubmissionUrl');
+  const notesEl = document.getElementById('editSubmissionNotes');
+
+  if (submission) {
+    titleEl.textContent = '✏️ 修改投递记录';
+    idEl.value = submission.id || '';
+    compEl.value = submission.company || '';
+    posEl.value = submission.position || '';
+    dateEl.value = submission.date || new Date().toISOString().slice(0, 10);
+    statusEl.value = submission.status || '在投';
+    profileSelect.value = submission.profileId || activeProfileId;
+    urlEl.value = submission.url || '';
+    notesEl.value = submission.notes || '';
+  } else {
+    titleEl.textContent = '➕ 添加投递记录';
+    idEl.value = '';
+    compEl.value = '';
+    posEl.value = '';
+    dateEl.value = new Date().toISOString().slice(0, 10);
+    statusEl.value = '在投';
+    profileSelect.value = activeProfileId;
+    urlEl.value = '';
+    notesEl.value = '';
+  }
+
+  modal.style.display = 'block';
+  compEl.focus();
+}
+
+function closeSubmissionEditModal() {
+  const modal = document.getElementById('submissionEditModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveSubmissionFromModal() {
+  const comp = document.getElementById('editSubmissionCompany').value.trim();
+  const pos = document.getElementById('editSubmissionPosition').value.trim();
+  if (!comp || !pos) {
+    showToast('请填写目标公司和岗位名称', 'warning');
+    return;
+  }
+
+  const id = document.getElementById('editSubmissionId').value.trim();
+  const date = document.getElementById('editSubmissionDate').value || new Date().toISOString().slice(0, 10);
+  const status = document.getElementById('editSubmissionStatus').value || '在投';
+  const profileId = document.getElementById('editSubmissionProfile').value;
+  const selectedProf = allProfiles.find((p) => p.id === profileId);
+  const profileName = selectedProf ? selectedProf.name : '默认资料';
+  const url = document.getElementById('editSubmissionUrl').value.trim();
+  const notes = document.getElementById('editSubmissionNotes').value.trim();
+
+  const data = { company: comp, position: pos, date, status, profileId, profileName, url, notes };
+
+  try {
+    if (id) {
+      await sendMessage({ action: 'updateSubmission', id, updates: data });
+      showToast('✅ 投递记录已更新', 'success');
+    } else {
+      await sendMessage({ action: 'addSubmission', data });
+      showToast('✅ 投递记录已添加', 'success');
+    }
+    closeSubmissionEditModal();
+    await loadSubmissions();
+  } catch (e) {
+    showToast(`保存失败: ${e.message}`, 'error');
+  }
+}
+
+async function deleteSubmissionRecord(id) {
+  const ok = await showAppleConfirm({
+    title: '删除投递记录',
+    subtitle: '确定要删除这条公司的投递记录吗？',
+    confirmText: '确定删除',
+    isDanger: true
+  });
+  if (!ok) return;
+  try {
+    const res = await sendMessage({ action: 'deleteSubmission', id });
+    if (res && res.success) {
+      allSubmissions = allSubmissions.filter((s) => s.id !== id);
+      updateSubmissionStats();
+      renderSubmissionsList();
+      showToast('投递记录已删除', 'success');
+    }
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+function exportSubmissionsCsv() {
+  if (!allSubmissions.length) {
+    showToast('暂无投递记录可导出', 'warning');
+    return;
+  }
+
+  const headers = ['公司名称', '投递岗位', '投递日期', '当前进度', '所用资料', '招聘网址', '备注复盘'];
+  const rows = allSubmissions.map((s) => [
+    `"${(s.company || '').replace(/"/g, '""')}"`,
+    `"${(s.position || '').replace(/"/g, '""')}"`,
+    `"${(s.date || '').replace(/"/g, '""')}"`,
+    `"${(s.status || '').replace(/"/g, '""')}"`,
+    `"${(s.profileName || '').replace(/"/g, '""')}"`,
+    `"${(s.url || '').replace(/"/g, '""')}"`,
+    `"${(s.notes || '').replace(/"/g, '""')}"`
+  ]);
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `秋招投递记录_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  showToast('✅ 投递记录已导出为 CSV 表格', 'success');
+}
+
+function bindSubmissionEvents() {
+  document.getElementById('addSubmissionBtn')?.addEventListener('click', () => openSubmissionEditModal(null));
+  document.getElementById('closeSubmissionModalBtn')?.addEventListener('click', closeSubmissionEditModal);
+  document.getElementById('cancelSubmissionEditBtn')?.addEventListener('click', closeSubmissionEditModal);
+  document.getElementById('saveSubmissionEditBtn')?.addEventListener('click', saveSubmissionFromModal);
+  document.getElementById('exportSubmissionsBtn')?.addEventListener('click', exportSubmissionsCsv);
+
+  const searchInput = document.getElementById('submissionSearchInput');
+  if (searchInput) {
+    let timer = null;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        submissionSearchQuery = e.target.value;
+        renderSubmissionsList();
+      }, 200);
+    });
+  }
+
+  const statusFilter = document.getElementById('submissionStatusFilter');
+  if (statusFilter) {
+    statusFilter.addEventListener('change', (e) => {
+      submissionFilterStatus = e.target.value;
+      updateSubmissionStats();
+      renderSubmissionsList();
+    });
+  }
+
+  document.querySelectorAll('.stat-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      const status = card.getAttribute('data-status') || 'all';
+      submissionFilterStatus = status;
+      if (statusFilter) statusFilter.value = status;
+      updateSubmissionStats();
+      renderSubmissionsList();
+    });
+  });
+}
+
+// ============================================================================
+// 页面目录侧边栏导航与滚动监听 (Sidebar Nav & Scroll Spy)
+// ============================================================================
+
+function initSidebarNav() {
+  const drawer = document.getElementById('sidebarDrawer');
+  const links = document.querySelectorAll('.sidebar-link');
+  if (!links.length) return;
+
+  // 点击平滑滚动定位并自动收起抽屉
+  links.forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = link.getAttribute('data-section') || link.getAttribute('href').replace(/^#/, '');
+      const targetSection = document.getElementById(targetId);
+      if (targetSection) {
+        targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, null, '#' + targetId);
+        links.forEach((l) => l.classList.remove('active'));
+        link.classList.add('active');
+
+        // 点击跳转后立即收起抽屉
+        if (drawer) {
+          drawer.classList.add('force-collapsed');
+          setTimeout(() => {
+            drawer.classList.remove('force-collapsed');
+          }, 350);
+        }
+      }
+    });
+  });
+
+  // 点击快速保存后也自动收起抽屉
+  document.getElementById('sidebarSaveBtn')?.addEventListener('click', () => {
+    if (drawer) {
+      drawer.classList.add('force-collapsed');
+      setTimeout(() => {
+        drawer.classList.remove('force-collapsed');
+      }, 350);
+    }
+  });
+
+  // 滚动监听高亮
+  const sectionIds = [
+    'section-ai',
+    'section-parser',
+    'section-basic',
+    'section-intention',
+    'section-awards',
+    'section-education',
+    'section-work',
+    'section-projects',
+    'section-skills'
+  ];
+
+  const sections = sectionIds.map((id) => document.getElementById(id)).filter(Boolean);
+
+  let scrollTimer = null;
+  window.addEventListener('scroll', () => {
+    if (scrollTimer) return;
+    scrollTimer = setTimeout(() => {
+      scrollTimer = null;
+      const scrollPos = window.scrollY + 120;
+      let currentSectionId = '';
+
+      for (let i = 0; i < sections.length; i++) {
+        const sec = sections[i];
+        const top = sec.offsetTop;
+        const height = sec.offsetHeight;
+        if (scrollPos >= top && scrollPos < top + height) {
+          currentSectionId = sec.id;
+          break;
+        }
+      }
+
+      if (!currentSectionId && sections.length > 0) {
+        if (scrollPos < sections[0].offsetTop) {
+          currentSectionId = sections[0].id;
+        } else {
+          currentSectionId = sections[sections.length - 1].id;
+        }
+      }
+
+      if (currentSectionId) {
+        links.forEach((l) => {
+          const sec = l.getAttribute('data-section') || l.getAttribute('href').replace(/^#/, '');
+          l.classList.toggle('active', sec === currentSectionId);
+        });
+      }
+    }, 60);
+  });
+}
+
+// ============================================================================
+// 顶栏多页面/视图切换管理器 (Apple HIG Segmented Tab Switcher)
+// ============================================================================
+
+function initTabNav() {
+  const tabs = document.querySelectorAll('.nav-tab-btn');
+  const views = {
+    profile: document.getElementById('view-profile'),
+    kanban: document.getElementById('view-kanban'),
+    logs: document.getElementById('view-logs'),
+    help: document.getElementById('view-help')
+  };
+
+  const navProfileGroup = document.getElementById('navProfileGroup');
+  const navSaveBtn = document.getElementById('saveBtn');
+  const navKanbanActions = document.getElementById('navKanbanActions');
+  const sidebarDrawer = document.getElementById('sidebarDrawer');
+  const navPageBadge = document.getElementById('navPageBadge');
+
+  function switchTab(tabKey, updateUrl = true) {
+    if (!views[tabKey]) tabKey = 'profile';
+
+    tabs.forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.tab === tabKey);
+    });
+
+    Object.entries(views).forEach(([k, viewEl]) => {
+      if (!viewEl) return;
+      if (k === tabKey) {
+        viewEl.style.display = 'block';
+        viewEl.classList.add('active');
+      } else {
+        viewEl.style.display = 'none';
+        viewEl.classList.remove('active');
+      }
+    });
+
+    // 切换顶栏控件和侧边栏
+    if (tabKey === 'profile') {
+      if (navProfileGroup) navProfileGroup.style.display = 'flex';
+      if (navSaveBtn) navSaveBtn.style.display = 'inline-flex';
+      if (navKanbanActions) navKanbanActions.style.display = 'none';
+      if (sidebarDrawer) sidebarDrawer.style.display = 'block';
+      if (navPageBadge) navPageBadge.textContent = '简历资料';
+    } else if (tabKey === 'kanban') {
+      if (navProfileGroup) navProfileGroup.style.display = 'none';
+      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navKanbanActions) navKanbanActions.style.display = 'flex';
+      if (sidebarDrawer) sidebarDrawer.style.display = 'none';
+      if (navPageBadge) navPageBadge.textContent = '投递看板';
+      updateSubmissionStats();
+      renderSubmissionsList();
+    } else if (tabKey === 'logs') {
+      if (navProfileGroup) navProfileGroup.style.display = 'none';
+      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navKanbanActions) navKanbanActions.style.display = 'none';
+      if (sidebarDrawer) sidebarDrawer.style.display = 'none';
+      if (navPageBadge) navPageBadge.textContent = '运行日志';
+      renderLogList();
+    } else if (tabKey === 'help') {
+      if (navProfileGroup) navProfileGroup.style.display = 'none';
+      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navKanbanActions) navKanbanActions.style.display = 'none';
+      if (sidebarDrawer) sidebarDrawer.style.display = 'none';
+      if (navPageBadge) navPageBadge.textContent = '使用说明';
+    }
+
+    if (updateUrl) {
+      history.replaceState(null, null, '#' + tabKey);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  // 顶栏投递看板快捷操作
+  document.getElementById('navAddSubmissionBtn')?.addEventListener('click', () => openSubmissionEditModal(null));
+  document.getElementById('navExportSubmissionsBtn')?.addEventListener('click', exportSubmissionsCsv);
+
+  // 解析 URL Hash 初始视图
+  const rawHash = window.location.hash.replace(/^#/, '');
+  if (rawHash === 'kanban' || rawHash === 'submissions' || rawHash === 'section-submissions' || rawHash === 'submissionSection') {
+    switchTab('kanban', false);
+  } else if (rawHash === 'logs' || rawHash === 'log') {
+    switchTab('logs', false);
+  } else if (rawHash === 'help' || rawHash === 'faq') {
+    switchTab('help', false);
+  } else {
+    switchTab('profile', false);
+    if (rawHash && rawHash !== 'profile') {
+      const initialTarget = document.getElementById(rawHash);
+      if (initialTarget) {
+        setTimeout(() => {
+          initialTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 250);
+      }
+    }
+  }
+
+  window.addEventListener('hashchange', () => {
+    const h = window.location.hash.replace(/^#/, '');
+    if (h === 'kanban' || h === 'submissions' || h === 'section-submissions' || h === 'submissionSection') {
+      switchTab('kanban', false);
+    } else if (h === 'logs' || h === 'log') {
+      switchTab('logs', false);
+    } else if (h === 'help' || h === 'faq') {
+      switchTab('help', false);
+    } else if (h === 'profile') {
+      switchTab('profile', false);
+    }
+  });
+}
+
+function bindAppLogging() {
+  if (typeof appLog === 'undefined') return;
+  appLog.info('options', 'page.init', '配置页已打开');
+  appLog.watchClicks(document);
+  document.getElementById('logLevelFilter')?.addEventListener('change', renderLogList);
+  document.getElementById('clearLogsBtn')?.addEventListener('click', async () => {
+    if (!confirm('确定清空全部运行日志？')) return;
+    await appLog.clear();
+    renderLogList();
+  });
+  document.getElementById('exportLogsBtn')?.addEventListener('click', exportLogs);
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.jobAutofillLogs) renderLogList(changes.jobAutofillLogs.newValue);
+  });
+  renderLogList();
+}
+
+function logLevelMatch(entry, filter) {
+  if (!filter || filter === 'all') return true;
+  if (filter === 'model') return String(entry.event || '').startsWith('model') || String(entry.event || '').startsWith('parse');
+  return entry.level === filter;
+}
+
+async function renderLogList(preset) {
+  const listEl = document.getElementById('logList');
+  const emptyEl = document.getElementById('logEmpty');
+  if (!listEl) return;
+  const logs = Array.isArray(preset) ? preset : (typeof appLog !== 'undefined' ? await appLog.list() : []);
+  const filter = document.getElementById('logLevelFilter')?.value || 'all';
+  const rows = logs.filter((item) => logLevelMatch(item, filter)).slice().reverse();
+  if (!rows.length) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  listEl.innerHTML = rows.map((item) => {
+    const time = (item.time || '').replace('T', ' ').replace('Z', '');
+    const detail = item.detail
+      ? `<pre class="log-detail">${html(String(item.detail))}</pre>`
+      : '';
+    return `<article class="log-item is-${html(item.level || 'info')}">
+      <div class="log-meta">
+        <span class="log-time">${html(time)}</span>
+        <span class="log-level">${html(item.level || 'info')}</span>
+        <span class="log-source">${html(item.source || '')}</span>
+        <span class="log-event">${html(item.event || '')}</span>
+      </div>
+      <div class="log-message">${html(item.message || '')}</div>
+      ${detail}
+    </article>`;
+  }).join('');
+}
+
+async function exportLogs() {
+  const logs = typeof appLog !== 'undefined' ? await appLog.list() : [];
+  const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `运行日志_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  if (typeof appLog !== 'undefined') appLog.info('options', 'log.export', `已导出 ${logs.length} 条日志`);
 }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "秋招网申助手",
+  "name": "Capybara网申助手",
   "version": "1.0.0",
-  "description": "智能识别并自动填写秋招网申表单，支持多套简历资料管理和AI增强",
+  "description": "Capybara网申助手 - 智能识别并自动秒填求职网申表单，支持多套简历资料管理与AI深度解析",
   "permissions": [
     "storage",
     "activeTab",
@@ -27,7 +27,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["scripts/content.js"],
+      "js": ["scripts/app-log.js", "scripts/content.js"],
       "css": ["styles/content.css"],
       "run_at": "document_idle"
     }
@@ -35,10 +35,13 @@
   "background": {
     "service_worker": "scripts/background.js"
   },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "options_page": "options/options.html",
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
+      "resources": ["icons/*", "vendor/pdfjs/*"],
       "matches": ["<all_urls>"]
     }
   ]

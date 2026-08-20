@@ -1,76 +1,195 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>秋招网申助手</title>
+  <title>Capybara网申助手</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <!-- 极简设计，参考 ApplyEase -->
+  <!-- 背景氛围光晕 (营造真实毛玻璃通透景深感) -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="ambient-glow glow-3"></div>
+
   <div class="container">
 
-    <!-- 头部：Logo + 标题 -->
-    <div class="header">
-      <img src="../icons/icon48.png" alt="logo" class="logo">
-      <div class="title">秋招网申助手</div>
+    <!-- 顶部导航与品牌 Header (Apple HIG 极简水平通栏) -->
+    <header class="header glass">
+      <div class="header-brand">
+        <div class="logo-box">
+          <img src="../icons/icon48.png" alt="logo" class="logo-img">
+        </div>
+        <div class="title-group">
+          <div class="title-row">
+            <span class="header-title">Capybara网申助手</span>
+            <span class="badge-pill">AI Pro</span>
+          </div>
+          <span class="header-subtitle">一键智能秒填网申表单</span>
+        </div>
+      </div>
+
+      <button type="button" id="themeToggle" class="theme-toggle" title="切换深浅主题" aria-label="切换深浅主题">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <!-- 资料选择区 (Apple 自定义浮层选择器，彻底告别 Win7 原生蓝框) -->
+    <div class="profile-card glass">
+      <div class="profile-card-header">
+        <span class="section-label">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          当前简历资料
+        </span>
+      </div>
+      <div class="profile-selector-row">
+        <!-- 苹果风自定义下拉菜单容器 -->
+        <div class="custom-dropdown" id="profileDropdown">
+          <button type="button" class="custom-dropdown-trigger" id="profileDropdownBtn">
+            <span class="profile-badge-icon">📇</span>
+            <span class="profile-current-name" id="selectedProfileName">默认资料</span>
+            <svg class="dropdown-arrow-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- 悬浮弹窗列表 -->
+          <div class="custom-dropdown-menu" id="profileDropdownMenu">
+            <!-- 动态填充 -->
+          </div>
+
+          <!-- 隐式原生 select 用于底层逻辑兼容 -->
+          <select id="profileSelect" style="display: none;"></select>
+        </div>
+
+        <button id="renameProfileBtn" class="icon-btn" title="重命名当前资料" aria-label="重命名当前资料">
+          <svg viewBox="0 0 24 24" width="13.5" height="13.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
+        <button id="addProfileBtn" class="icon-btn" title="新增资料" aria-label="新增资料">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <!-- 资料选择器 -->
-    <div class="profile-selector">
-      <select id="profileSelect">
-        <option value="">加载中...</option>
-      </select>
-      <button id="addProfileBtn" class="icon-btn" title="新增资料">+</button>
-    </div>
-
-    <!-- 主要操作按钮 -->
+    <!-- 主要操作按钮区 -->
     <div class="action-buttons">
       <button id="fillBtn" class="btn-primary">
-        ✨ 填充当前页面
+        <span class="btn-glow"></span>
+        <span class="btn-content">
+          <svg class="btn-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+          </svg>
+          <span class="btn-text">填充当前页面</span>
+        </span>
       </button>
+
       <button id="settingsBtn" class="btn-secondary">
-        ⚙️ 配置资料
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        <span>配置资料</span>
       </button>
     </div>
 
     <!-- 加载状态 -->
-    <div id="loadingState" class="loading" style="display: none;">
-      <div class="spinner"></div>
-      <span>填充中...</span>
+    <div id="loadingState" class="loading-bar glass" style="display: none;">
+      <div class="spinner-ring"></div>
+      <span class="loading-text">正在智能识别并填充表单...</span>
     </div>
 
-    <!-- 状态信息 -->
-    <div class="status-info">
-      <div class="status-item">
-        <span class="label">当前资料</span>
-        <span id="currentProfile" class="value">-</span>
+    <!-- 状态与完整度卡片 -->
+    <div class="status-info glass">
+      <div class="status-header">
+        <div class="status-col">
+          <span class="status-label">当前资料</span>
+          <span id="currentProfile" class="status-value highlight">-</span>
+        </div>
+        <div class="status-col text-right">
+          <span class="status-label">上次使用</span>
+          <span id="lastUsed" class="status-value muted">-</span>
+        </div>
       </div>
-      <div class="status-item">
-        <span class="label">完整度</span>
-        <span id="completeness" class="value">-</span>
-      </div>
-      <div class="status-item">
-        <span class="label">上次使用</span>
-        <span id="lastUsed" class="value">-</span>
+
+      <div class="progress-section">
+        <div class="progress-info">
+          <span class="progress-label">简历完整度</span>
+          <span id="completeness" class="progress-val">0%</span>
+        </div>
+        <div class="progress-track">
+          <div id="completenessBar" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
       </div>
     </div>
 
-    <!-- 分隔线 -->
-    <div class="divider"></div>
-
-    <!-- 底部链接 -->
-    <div class="footer-links">
-      <a href="#" id="exportLink">导出数据</a>
-      <span class="separator">·</span>
-      <a href="#" id="importLink">导入数据</a>
-      <span class="separator">·</span>
-      <a href="#" id="helpLink">使用帮助</a>
+    <!-- 投递统计速览 -->
+    <div id="historySummaryCard" class="history-summary-card glass">
+      <div class="history-summary-left">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>已记录投递: <strong id="popupSubTotal">0</strong> 家</span>
+      </div>
+      <a href="#" id="viewHistoryLink" class="history-link">投递看板 →</a>
     </div>
+
+    <!-- 底部操作导航 -->
+    <footer class="footer-bar glass">
+      <a href="#" id="exportLink" class="footer-link">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>导出数据</span>
+      </a>
+      <span class="footer-sep">·</span>
+      <a href="#" id="importLink" class="footer-link">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span>导入数据</span>
+      </a>
+      <span class="footer-sep">·</span>
+      <a href="#" id="helpLink" class="footer-link">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        <span>使用帮助</span>
+      </a>
+    </footer>
 
   </div>
 
   <script src="../scripts/storage.js"></script>
+  <script src="../scripts/app-log.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

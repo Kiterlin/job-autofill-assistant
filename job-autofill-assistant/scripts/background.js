@@ -4,9 +4,10 @@
 // ============================================================================
 
 // 导入storage manager（在service worker中需要用importScripts）
-importScripts('storage.js', 'resume-parser.js');
+importScripts('storage.js', 'resume-parser.js', 'app-log.js');
 
 console.log('[秋招助手] Background Service Worker 已启动');
+if (typeof appLog !== 'undefined') appLog.info('background', 'sw.start', '后台服务已启动');
 
 // 初始化存储
 storageManager.initialize().then(() => {
@@ -84,6 +85,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'parseResume':
       handleParseResume(request.fileData, request.fileName, sendResponse);
+      return true;
+
+    case 'getSubmissions':
+      handleGetSubmissions(sendResponse);
+      return true;
+
+    case 'addSubmission':
+    case 'recordSubmission':
+      handleAddSubmission(request.data, sendResponse);
+      return true;
+
+    case 'updateSubmission':
+      handleUpdateSubmission(request.id, request.updates, sendResponse);
+      return true;
+
+    case 'deleteSubmission':
+      handleDeleteSubmission(request.id, sendResponse);
+      return true;
+
+    case 'appendLog':
+      persistLogEntries([request.entry]).then(() => sendResponse({ success: true }));
+      return true;
+
+    case 'appendLogs':
+      persistLogEntries(request.entries || []).then(() => sendResponse({ success: true }));
+      return true;
+
+    case 'getLogs':
+      chrome.storage.local.get(APP_LOG_KEY, (res) => {
+        sendResponse({ success: true, logs: res && res[APP_LOG_KEY] ? res[APP_LOG_KEY] : [] });
+      });
+      return true;
+
+    case 'clearLogs':
+      chrome.storage.local.set({ [APP_LOG_KEY]: [] }, () => sendResponse({ success: true }));
       return true;
 
     default:
@@ -266,29 +302,16 @@ async function handleParseResume(fileData, fileName, sendResponse) {
     const blob = await response.blob();
     const file = new File([blob], fileName, { type: blob.type });
 
-    // 提取文本
-    let resumeText;
+    // 优先让模型读取原始文件；接口不支持时由解析器自动提取文字重试
     try {
-      resumeText = await resumeParser.extractText(file);
-      console.log('[简历解析] 文本提取成功，长度:', resumeText.length);
-    } catch (error) {
-      console.error('[简历解析] 文本提取失败:', error);
-      sendResponse({
-        success: false,
-        error: 'EXTRACT_FAILED',
-        message: '简历文本提取失败，请确保文件格式正确'
-      });
-      return;
-    }
-
-    // 使用AI解析
-    try {
-      const parsedData = await resumeParser.parseWithAI(resumeText, settings);
-      console.log('[简历解析] AI解析成功');
+      const result = await resumeParser.parseFileWithAI(file, settings);
+      console.log('[简历解析] AI解析成功，输入模式:', result.inputMode);
 
       sendResponse({
         success: true,
-        data: parsedData
+        data: result.data,
+        inputMode: result.inputMode,
+        extractionMode: result.extractionMode || ''
       });
     } catch (error) {
       console.error('[简历解析] AI解析失败:', error);
@@ -305,6 +328,46 @@ async function handleParseResume(fileData, fileName, sendResponse) {
       error: 'UNKNOWN_ERROR',
       message: e.message || '解析失败'
     });
+  }
+}
+
+// ============================================================================
+// 投递历史处理函数
+// ============================================================================
+
+async function handleGetSubmissions(sendResponse) {
+  try {
+    const list = await storageManager.getSubmissions();
+    sendResponse({ success: true, submissions: list });
+  } catch (e) {
+    sendResponse({ success: false, error: e.message });
+  }
+}
+
+async function handleAddSubmission(data, sendResponse) {
+  try {
+    const record = await storageManager.addSubmission(data);
+    sendResponse({ success: true, record });
+  } catch (e) {
+    sendResponse({ success: false, error: e.message });
+  }
+}
+
+async function handleUpdateSubmission(id, updates, sendResponse) {
+  try {
+    const ok = await storageManager.updateSubmission(id, updates);
+    sendResponse({ success: ok });
+  } catch (e) {
+    sendResponse({ success: false, error: e.message });
+  }
+}
+
+async function handleDeleteSubmission(id, sendResponse) {
+  try {
+    const ok = await storageManager.deleteSubmission(id);
+    sendResponse({ success: ok });
+  } catch (e) {
+    sendResponse({ success: false, error: e.message });
   }
 }
 

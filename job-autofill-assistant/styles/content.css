@@ -1,161 +1,282 @@
 /* ============================================================================
-   Content Script 样式
+   秋招网申助手 - 网页悬浮球与轻提示 (毛玻璃圆角 · 高级质感)
    ============================================================================ */
 
-/* 悬浮按钮 */
 #job-autofill-float-btn {
   position: fixed;
-  right: 20px;
-  bottom: 100px;
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-  cursor: pointer;
-  z-index: 999999;
+  right: 24px;
+  bottom: 88px;
+  z-index: 2147483646;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  color: white;
-  font-size: 12px;
-  font-weight: 600;
+  gap: 8px;
+  height: 42px;
+  padding: 0 16px 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 19, 32, 0.72);
+  color: #f8fafc;
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  cursor: pointer;
   user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#job-autofill-float-btn[data-theme="light"] {
+  border-color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.82);
+  color: #0f172a;
+  box-shadow: 0 12px 28px -4px rgba(148, 163, 184, 0.35), inset 0 1px 2px rgba(255, 255, 255, 1);
 }
 
 #job-autofill-float-btn:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 16px 36px -4px rgba(99, 102, 241, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  border-color: rgba(129, 140, 248, 0.45);
 }
 
 #job-autofill-float-btn:active {
-  transform: scale(0.95);
+  transform: translateY(0) scale(0.96);
 }
 
-#job-autofill-float-btn.loading {
-  animation: rotate 1s linear infinite;
+#job-autofill-float-btn .float-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #818cf8, #c084fc);
+  box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);
+  transition: all 0.2s ease;
 }
 
-.float-btn-icon {
-  font-size: 24px;
-  line-height: 1;
+#job-autofill-float-btn.is-busy .float-dot {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(129, 140, 248, 0.3);
+  border-top-color: #818cf8;
+  background: transparent;
+  box-shadow: none;
+  animation: job-autofill-spin 0.75s linear infinite;
 }
 
 .float-btn-text {
-  font-size: 11px;
-  margin-top: 2px;
+  line-height: 1;
+  background: linear-gradient(135deg, #ffffff 30%, #cbd5e1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
-@keyframes rotate {
-  from { transform: rotate(0deg); }
+[data-theme="light"] .float-btn-text {
+  background: linear-gradient(135deg, #0f172a 30%, #334155 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes job-autofill-spin {
   to { transform: rotate(360deg); }
 }
 
-/* 通知提示 */
 #job-autofill-notification {
   position: fixed;
-  top: 20px;
-  right: 20px;
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000000;
-  animation: slideIn 0.3s ease;
-  max-width: 300px;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  max-width: 380px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 19, 32, 0.88);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 550;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   word-wrap: break-word;
+  animation: job-autofill-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
 }
 
 #job-autofill-notification.success {
-  background-color: #4caf50;
-  color: white;
-}
-
-#job-autofill-notification.warning {
-  background-color: #ff9800;
-  color: white;
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
 }
 
 #job-autofill-notification.error {
-  background-color: #f44336;
-  color: white;
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
 }
 
-#job-autofill-notification.info {
-  background-color: #2196f3;
-  color: white;
+#job-autofill-notification.warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
 }
 
 #job-autofill-notification.fade-out {
-  animation: slideOut 0.3s ease;
   opacity: 0;
+  transform: translateX(-50%) translateY(-10px) scale(0.94);
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
-@keyframes slideIn {
+@keyframes job-autofill-pop {
   from {
-    transform: translateX(400px);
     opacity: 0;
+    transform: translateX(-50%) translateY(-16px) scale(0.92);
   }
   to {
-    transform: translateX(0);
     opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
   }
 }
 
-@keyframes slideOut {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(400px);
-    opacity: 0;
-  }
-}
-
-/* 填充字段高亮（临时）*/
-input[style*="background-color: rgb(232, 245, 233)"],
-textarea[style*="background-color: rgb(232, 245, 233)"],
-select[style*="background-color: rgb(232, 245, 233)"] {
-  transition: all 2s ease;
-}
-
-/* 新增通知样式 */
-.job-autofill-notification {
+#job-autofill-dock {
   position: fixed;
-  top: 20px;
   right: 20px;
-  padding: 12px 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000000;
-  font-size: 14px;
-  font-weight: 500;
-  opacity: 0;
-  transform: translateX(100px);
-  transition: all 0.3s ease;
+  bottom: 88px;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
 }
 
-.job-autofill-notification.show {
-  opacity: 1;
-  transform: translateX(0);
+#job-autofill-float-btn {
+  position: static;
+  right: auto;
+  bottom: auto;
 }
 
-.job-autofill-notification.success {
-  border-left: 4px solid #10b981;
-  color: #065f46;
+#job-autofill-log-toggle {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(15, 19, 32, 0.72);
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.job-autofill-notification.error {
-  border-left: 4px solid #ef4444;
-  color: #991b1b;
+#job-autofill-log-toggle[data-theme="light"] {
+  border-color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.82);
+  color: #0f172a;
 }
 
-.job-autofill-notification.warning {
-  border-left: 4px solid #f59e0b;
-  color: #92400e;
+#job-autofill-log-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 180px;
+  z-index: 2147483646;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(52vh, 460px);
+  display: none;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 19, 32, 0.88);
+  color: #f8fafc;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+}
+
+#job-autofill-log-panel[data-theme="light"] {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+}
+
+#job-autofill-log-panel[data-open="true"] {
+  display: flex;
+}
+
+.job-autofill-log-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+}
+
+.job-autofill-log-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.job-autofill-log-actions button {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+}
+
+.job-autofill-log-empty {
+  padding: 20px 14px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.job-autofill-log-list {
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.job-autofill-log-item {
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.job-autofill-log-item.is-error {
+  background: rgba(239, 68, 68, 0.16);
+}
+
+.job-autofill-log-item.is-success {
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.job-autofill-log-meta {
+  display: flex;
+  gap: 8px;
+  opacity: 0.7;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.job-autofill-log-level {
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.job-autofill-log-detail {
+  margin: 6px 0 0;
+  max-height: 90px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  opacity: 0.8;
 }

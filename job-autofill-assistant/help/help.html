@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>使用帮助与指南 - Capybara网申助手</title>
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    :root,
+    [data-theme="light"] {
+      --bg: #f5f5f7;
+      --card-bg: #ffffff;
+      --card-nested: #f5f5f7;
+      --border: rgba(0, 0, 0, 0.08);
+      --border-highlight: rgba(0, 0, 0, 0.16);
+      --text-main: #1d1d1f;
+      --text-secondary: #6e6e73;
+      --text-muted: #86868b;
+      --accent: #0071e3;
+      --accent-hover: #0077ed;
+      --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+      --nav-bg: rgba(255, 255, 255, 0.88);
+      --code-bg: #f5f5f7;
+    }
+
+    [data-theme="dark"] {
+      --bg: #000000;
+      --card-bg: #1c1c1e;
+      --card-nested: #2c2c2e;
+      --border: rgba(255, 255, 255, 0.12);
+      --border-highlight: rgba(255, 255, 255, 0.22);
+      --text-main: #f5f5f7;
+      --text-secondary: #a1a1a6;
+      --text-muted: #86868b;
+      --accent: #0a84ff;
+      --accent-hover: #2693ff;
+      --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      --nav-bg: rgba(22, 22, 23, 0.88);
+      --code-bg: #2c2c2e;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Segoe UI", "Noto Sans SC", sans-serif;
+      font-size: 14px;
+      line-height: 1.65;
+      min-height: 100vh;
+    }
+
+    /* 顶部导航 */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--nav-bg);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 12px 24px;
+    }
+
+    .nav-container {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .nav-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    .nav-title {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .nav-badge {
+      font-size: 11px;
+      font-weight: 550;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--card-nested);
+      color: var(--accent);
+      border: 1px solid var(--border);
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-nav {
+      height: 32px;
+      padding: 0 14px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      text-decoration: none;
+      font-size: 12.5px;
+      font-weight: 550;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-nav:hover {
+      background: var(--accent-hover);
+    }
+
+    .theme-toggle-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--card-nested);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .theme-toggle-btn:hover {
+      color: var(--text-main);
+    }
+
+    [data-theme="dark"] .icon-sun { display: block; }
+    [data-theme="dark"] .icon-moon { display: none; }
+    [data-theme="light"] .icon-sun { display: none; }
+    [data-theme="light"] .icon-moon { display: block; }
+
+    /* 主内容区 */
+    .main-container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .hero-section {
+      text-align: center;
+      padding: 20px 0 10px;
+    }
+
+    .hero-title {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .hero-subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      max-width: 580px;
+      margin: 0 auto;
+    }
+
+    /* 帮助卡片 */
+    .guide-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      box-shadow: var(--card-shadow);
+    }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 650;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* 步骤网格 */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 14px;
+    }
+
+    .step-item {
+      background: var(--card-nested);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .step-badge {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--accent);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step-heading {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .step-desc {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* 功能列表 */
+    .feature-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .feature-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      background: var(--card-nested);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .feature-icon {
+      font-size: 18px;
+      line-height: 1;
+      margin-top: 2px;
+    }
+
+    .feature-info h4 {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .feature-info p {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    /* FAQ 手风琴式 */
+    .faq-item {
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .faq-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .faq-q {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .faq-a {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      padding-left: 22px;
+    }
+
+    /* 快捷操作区 */
+    .footer-dock {
+      text-align: center;
+      padding: 20px 0 0;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部导航 -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="../options/options.html" class="nav-brand">
+        <img src="../icons/icon48.png" alt="logo" class="nav-logo">
+        <span class="nav-title">Capybara网申助手</span>
+        <span class="nav-badge">使用帮助</span>
+      </a>
+
+      <div class="nav-actions">
+        <a href="../options/options.html" class="btn-nav">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>打开配置中心</span>
+        </a>
+        <button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="切换深浅主题" aria-label="切换深浅主题">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 主内容 -->
+  <main class="main-container">
+
+    <!-- 标头 -->
+    <header class="hero-section">
+      <h2 class="hero-title">🦫 欢迎使用 Capybara网申助手</h2>
+      <p class="hero-subtitle">智能识别并秒速填充秋招/春招与日常求职网申表单，告别重复机械复制粘贴。</p>
+    </header>
+
+    <!-- 快速上手 4 步 -->
+    <section class="guide-card">
+      <h3 class="card-title">🚀 极速上手流程</h3>
+      <div class="steps-grid">
+        <div class="step-item">
+          <div class="step-badge">1</div>
+          <div class="step-heading">录入简历资料</div>
+          <div class="step-desc">进入配置中心填写个人基本信息、教育、实习/工作与项目经历，或直接粘贴简历让 AI 一键解析填入。</div>
+        </div>
+        <div class="step-item">
+          <div class="step-badge">2</div>
+          <div class="step-heading">打开招聘网申页面</div>
+          <div class="step-desc">打开各大企业校招官网、各大招聘平台（北森、牛客、大易、Moka、智联等）的网申填写页面。</div>
+        </div>
+        <div class="step-item">
+          <div class="step-badge">3</div>
+          <div class="step-heading">点击一键智能填充</div>
+          <div class="step-desc">点击浏览器右上角插件图标，点击「填充当前页面」，扩展即可毫秒级识别输入框并智能填充。</div>
+        </div>
+        <div class="step-item">
+          <div class="step-badge">4</div>
+          <div class="step-heading">核对并轻松投递</div>
+          <div class="step-desc">检查页面中高亮已填充的项目，微调特殊非标问卷后即可提交，插件会自动为您记录投递历史看板！</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 核心亮点功能 -->
+    <section class="guide-card">
+      <h3 class="card-title">✨ 核心功能亮点</h3>
+      <div class="feature-list">
+        <div class="feature-row">
+          <div class="feature-icon">📁</div>
+          <div class="feature-info">
+            <h4>多套资料自由切换与重命名</h4>
+            <p>支持针对不同求职目标（如研发岗、产品岗、运营岗）创建并重命名独立资料卡，投递时一秒无缝切换。</p>
+          </div>
+        </div>
+
+        <div class="feature-row">
+          <div class="feature-icon">🤖</div>
+          <div class="feature-info">
+            <h4>AI 智能简历解析与 HR 自荐信生成</h4>
+            <p>支持 DeepSeek、阿里云百炼通义、智谱 GLM 等主流大模型，支持一键提炼 200~300 字高光自荐打招呼文案，方便一键复制至 Boss/智联/邮件与 HR 破冰。</p>
+          </div>
+        </div>
+
+        <div class="feature-row">
+          <div class="feature-icon">📊</div>
+          <div class="feature-info">
+            <h4>全自动投递历史与进度看板</h4>
+            <p>在表单填写时自动嗅探当前企业、岗位、投递网址、所用资料及日期；提供在投、笔试、面试、Offer、挂了六维状态看板，支持二次修改与 CSV 导出。</p>
+          </div>
+        </div>
+
+        <div class="feature-row">
+          <div class="feature-icon">🔒</div>
+          <div class="feature-info">
+            <h4>本地隐私与数据安全</h4>
+            <p>全部简历信息严格存储在您个人的浏览器本地环境中（Chrome Local Storage），杜绝任何第三方服务器截留，并支持一键本地 JSON 备份与恢复。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 常见问题 FAQ -->
+    <section class="guide-card">
+      <h3 class="card-title">❓ 常见问题与解答 (FAQ)</h3>
+
+      <div class="faq-item">
+        <div class="faq-q">📌 Q1: 某些招聘网站的部分下拉框或级联选择未能自动选上？</div>
+        <div class="faq-a">部分企业自研招聘系统使用了高度定制的非标准级联组件，建议先点击「填充当前页面」完成 95% 以上常规输入框填充，再手动点选 1~2 个特殊级联选择项即可。</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">📌 Q2: 如何使用 AI 简历解析功能？</div>
+        <div class="faq-a">进入「配置中心」→ 滚动至「AI 智能解析与模型设置」→ 输入您的 API Key（如 DeepSeek 或 通义千问，费用通常仅需几厘钱）→ 粘贴简历文本或上传 PDF/Word → 点击「AI 智能解析」即可自动填充全套资料卡。</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">📌 Q3: 更换电脑或重装浏览器后，我的资料会丢失吗？</div>
+        <div class="faq-a">插件弹窗底部提供了「导出数据」按钮，点击即可将全部资料一键导出为 <code>.json</code> 备份文件；在新设备上点击「导入数据」即可秒速恢复所有资料与投递记录。</div>
+      </div>
+    </section>
+
+    <!-- 页脚说明 -->
+    <footer class="footer-dock">
+      <p>Capybara网申助手 · 让每一份投递都从容高效</p>
+    </footer>
+
+  </main>
+
+  <script>
+    // 主题初始化与切换
+    const toggleBtn = document.getElementById('themeToggleBtn');
+    
+    function initTheme() {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({ action: 'getSettings' }, (res) => {
+          const theme = res?.settings?.uiTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        });
+      }
+    }
+
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'updateSettings', settings: { uiTheme: next } });
+        }
+      });
+    }
+
+    initTheme();
+  </script>
+</body>
+</html>
