@@ -336,6 +336,9 @@ class ResumeParser {
       temperature: options.temperature ?? 0.1
     };
     if (options.maxTokens) body.max_tokens = options.maxTokens;
+    if (options.enableThinking === false && settings.aiProvider === 'siliconflow') {
+      body.enable_thinking = false;
+    }
     if (options.jsonMode && provider.jsonMode) {
       body.response_format = { type: 'json_object' };
     }
@@ -352,7 +355,15 @@ class ResumeParser {
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       throw new Error(`${provider.label} 返回数据格式异常`);
     }
-    return data.choices[0].message.content;
+    const message = data.choices[0].message;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (!content) {
+      const reason = message.reasoning_content
+        ? '模型只返回了思考内容，没有生成可填写正文'
+        : '模型没有返回可填写正文';
+      throw new Error(`${provider.label} ${reason}`);
+    }
+    return content;
   }
 
   async callGemini(settings, provider, messages, options = {}) {
@@ -805,7 +816,16 @@ JSON schema 规范：
 4. politicalStatus 如有提及规范为：中共党员 / 中共预备党员 / 共青团员 / 群众 / 民主党派
 5. 四六级如有成绩（如 CET-6 580），填入 languageSkills.cet6 为 "580分" 或 "通过"
 6. education/workExperience/projects/awards 只输出真实有效条目，无内容返回 []
-7. hrGreeting：根据简历提炼一段用于 BOSS直聘/智联等招聘软件直接发给 HR 的打招呼语。包含：姓名、学校学历与专业、工作/实习（几段+简要概括）、项目经历（几个+简要概括）、重要大奖（仅限国奖、优秀毕业生、四六级550+、数学建模/ACM/计算机大赛一二三等奖等硬核大奖，过滤掉校内普通小奖）、个人优势。严格压缩在 200 字以内（履历极多时不得超过 300 字），真诚专业。
+7. 项目经历规范解耦提取（至关重要）：
+   - description: 仅包含项目背景与系统定位概述（1~3句话说明该项目是什么、解决什么业务痛点）。严禁把个人工作职责和成果混入 description！
+   - responsibilities: 提取个人在项目中的具体职责、分工内容、核心模块开发与难点攻关（条理分明列出，如 ●构建50w条语料微调Bert模型...）。
+   - achievements: 提炼项目的核心量化成果与业务成效指标（如 准确率提升至90%、延迟降低50ms、高并发支持等）。
+   - techStack: 提取该项目使用的核心技术、框架与工具清单（逗号分隔，如 Bert, PyTorch, Redis, FastAPI）。
+   - role: 担任角色（如 核心算法开发者 / 项目负责人 / 前端开发）。
+8. 工作/实习经历规范提取：
+   - description: 核心工作内容与岗位职责（分条列出）。
+   - achievements: 实习产出与量化业务成果。
+9. hrGreeting：根据简历提炼一段用于 BOSS直聘/智联等招聘软件直接发给 HR 的打招呼语。包含：姓名、学校学历与专业、工作/实习（几段+简要概括）、项目经历（几个+简要概括）、重要大奖（仅限国奖、优秀毕业生、四六级550+、数学建模/ACM/计算机大赛一二三等奖等硬核大奖，过滤掉校内普通小奖）、个人优势。严格压缩在 200 字以内（履历极多时不得超过 300 字），真诚专业。
 
 简历内容：
 ${resumeText}`;
@@ -972,18 +992,64 @@ ${resumeText}`;
         description: str(w.description),
         achievements: str(w.achievements)
       })).filter((w) => w.company || w.position),
-      projects: arr(data.projects).map((p) => ({
-        name: str(p.name),
-        role: str(p.role),
-        projectType: str(p.projectType || '商业项目'),
-        techStack: str(p.techStack || (Array.isArray(p.technologies) ? p.technologies.join(', ') : '')),
-        startDate: str(p.startDate || p.start),
-        endDate: str(p.endDate || p.end),
-        projectUrl: str(p.projectUrl || p.url),
-        description: str(p.description),
-        responsibilities: str(p.responsibilities),
-        achievements: str(p.achievements)
-      })).filter((p) => p.name),
+      projects: arr(data.projects).map((p) => {
+        let desc = str(p.description);
+        let resp = str(p.responsibilities);
+        let achieve = str(p.achievements);
+        const tech = str(p.techStack || (Array.isArray(p.technologies) ? p.technologies.join(', ') : ''));
+
+        // 如果 AI 将职责与成果全混入 description，进行后置智能解耦
+        if (!resp && desc) {
+          const lines = desc.split('\n').map(l => l.trim()).filter(Boolean);
+          const descLines = [];
+          const respLines = [];
+          const achieveLines = [];
+          let curSec = 'desc';
+
+          for (const line of lines) {
+            if (/^(项目描述|项目背景|项目简介|项目介绍|背景|介绍)[：:]/i.test(line)) {
+              curSec = 'desc';
+              descLines.push(line.replace(/^(项目描述|项目背景|项目简介|项目介绍|背景|介绍)[：:]/i, '').trim());
+            } else if (/^(项目职责|个人职责|主要职责|职责|工作内容|负责内容|项目内容|主要工作|个人分工|担任角色)[：:]/i.test(line)) {
+              curSec = 'resp';
+              respLines.push(line.replace(/^(项目职责|个人职责|主要职责|职责|工作内容|负责内容|项目内容|主要工作|个人分工|担任角色)[：:]/i, '').trim());
+            } else if (/^(项目成果|主要成果|项目业绩|量化成果|主要成效|成果|业绩)[：:]/i.test(line)) {
+              curSec = 'achieve';
+              achieveLines.push(line.replace(/^(项目成果|主要成果|项目业绩|量化成果|主要成效|成果|业绩)[：:]/i, '').trim());
+            } else if (/^[●•\-*]\s*(职责|负责|构建|设计|微调|开发|实现|重构|编写|主导|优化|搭建|处理|训练|部署|集成)/i.test(line) ||
+                       /^(负责|主导|构建|设计|微调|开发|实现|编写|搭建|训练)/i.test(line)) {
+              respLines.push(line);
+            } else if (/[0-9]+%|降低[0-9]+|提升[0-9]+|并发|延迟|准确率|QPS|TPS|节省|产出|上线/i.test(line) && curSec === 'achieve') {
+              achieveLines.push(line);
+            } else {
+              if (curSec === 'resp') respLines.push(line);
+              else if (curSec === 'achieve') achieveLines.push(line);
+              else descLines.push(line);
+            }
+          }
+
+          if (respLines.length) {
+            resp = respLines.join('\n');
+            desc = descLines.join('\n') || (lines[0] && !lines[0].startsWith('●') ? lines[0] : desc);
+          }
+          if (achieveLines.length && !achieve) {
+            achieve = achieveLines.join('\n');
+          }
+        }
+
+        return {
+          name: str(p.name),
+          role: str(p.role),
+          projectType: str(p.projectType || '商业项目'),
+          techStack: tech,
+          startDate: str(p.startDate || p.start),
+          endDate: str(p.endDate || p.end),
+          projectUrl: str(p.projectUrl || p.url),
+          description: desc,
+          responsibilities: resp,
+          achievements: achieve
+        };
+      }).filter((p) => p.name),
       skills: arr(data.skills).map(str).filter(Boolean),
       introduction: str(data.introduction),
       hrGreeting: str(data.hrGreeting)

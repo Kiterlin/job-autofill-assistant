@@ -14,40 +14,103 @@ let modelFetchSeq = 0;
 let selectedAiResumeFile = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('[Options] 初始化');
-  await initTheme();
+  // 1. 并发并行获取设置、简历资料与投递记录，彻底消除多重 IPC 串行往返延迟
+  const [settingsRes, profilesRes, submissionsRes] = await Promise.all([
+    sendMessage({ action: 'getSettings' }).catch(() => ({})),
+    sendMessage({ action: 'getAllProfiles' }).catch(() => ({})),
+    sendMessage({ action: 'getSubmissions' }).catch(() => ({}))
+  ]);
+
+  // 2. 极速应用主题
+  applyThemeFromSettings(settingsRes);
+
+  // 3. 填充资料数据
+  if (profilesRes && profilesRes.success) {
+    allProfiles = profilesRes.profiles || [];
+    activeProfileId = profilesRes.activeProfileId;
+    currentProfile = allProfiles.find((profile) => profile.id === activeProfileId) || allProfiles[0] || null;
+
+    const select = document.getElementById('profileSelect');
+    if (select) {
+      select.innerHTML = '';
+      allProfiles.forEach((profile) => {
+        const option = document.createElement('option');
+        option.value = profile.id;
+        option.textContent = profile.name;
+        if (profile.id === activeProfileId) option.selected = true;
+        select.appendChild(option);
+      });
+    }
+
+    if (currentProfile) {
+      loadProfileToForm(currentProfile);
+    }
+    renderNavCustomDropdown();
+  }
+
+  // 4. 应用 AI 与 OCR 配置
+  applyAiSettings(settingsRes);
+
+  // 5. 应用投递历史数据
+  allSubmissions = submissionsRes && submissionsRes.success && Array.isArray(submissionsRes.submissions) ? submissionsRes.submissions : [];
+  updateSubmissionStats();
+
+  // 6. 初始化出生日期选择器与所有 Apple Select 控件 (单次统一转换)
   initBirthDatePicker();
-  await loadProfiles();
-  await loadSubmissions();
+  initAllAppleSelects();
+
+  // 7. 绑定事件与导航
   bindEvents();
   bindSubmissionEvents();
-  initAllAppleSelects();
   initTabNav();
   bindAppLogging();
+
 });
 
-async function initTheme() {
+function applyThemeFromSettings(response) {
   try {
-    const response = await sendMessage({ action: 'getSettings' });
     const saved = response && response.success ? response.settings?.uiTheme : '';
     const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
     const theme = saved || (prefersLight ? 'light' : 'dark');
-    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+    const mode = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', mode);
+    try { localStorage.setItem('capybara-ui-theme', mode); } catch (e) {}
   } catch (e) {
     console.log('[Options] 主题初始化异常，使用默认主题', e);
   }
 }
 
-async function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme');
+function applyAiSettings(response) {
+  if (!response || !response.success) return;
+  const settings = response.settings || {};
+  document.getElementById('aiEnabled').checked = !!settings.aiEnabled;
+  document.getElementById('aiProvider').value = settings.aiProvider || 'deepseek';
+  document.getElementById('aiApiKey').value = settings.aiApiKey || '';
+  document.getElementById('aiApiUrl').value = settings.aiApiUrl || '';
+  document.getElementById('aiSettings').style.display = settings.aiEnabled ? 'block' : 'none';
+  populateModelSelect(settings.aiModel ? [settings.aiModel] : [], settings.aiModel || '');
+  const ocrInput = document.getElementById('ocrApiKey');
+  if (ocrInput) ocrInput.value = settings.ocrApiKey || '';
+  if (settings.aiApiKey && settings.aiEnabled) {
+    refreshModelList({ silent: true });
+  }
+}
+
+async function initTheme() {
+  try {
+    const response = await sendMessage({ action: 'getSettings' });
+    applyThemeFromSettings(response);
+  } catch (e) {
+    console.log('[Options] 主题初始化异常', e);
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
   const next = current === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
-  try {
-    await sendMessage({ action: 'updateSettings', settings: { uiTheme: next } });
-    showToast(next === 'light' ? '☀️ 已切换为日间明亮主题' : '🌙 已切换为夜间深色主题', 'info');
-  } catch (e) {
-    console.error('保存主题设置失败:', e);
-  }
+  try { localStorage.setItem('capybara-ui-theme', next); } catch (e) {}
+  sendMessage({ action: 'updateSettings', settings: { uiTheme: next } }).catch(() => {});
 }
 
 function sendMessage(payload) {
@@ -1119,6 +1182,9 @@ function bindEvents() {
     if (!e.target.closest('.apple-custom-select-box')) {
       document.querySelectorAll('.apple-custom-select-box.is-open').forEach((b) => b.classList.remove('is-open'));
     }
+    if (!e.target.closest('.apple-status-dropdown-box')) {
+      document.querySelectorAll('.apple-status-dropdown-box.is-open').forEach((b) => b.classList.remove('is-open'));
+    }
   });
 
   document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
@@ -1733,6 +1799,17 @@ function handleAiFileImport(e) {
   showToast(`已上传 ${file.name} 并保存为简历源文件`, 'success');
 }
 
+function ensurePdfJs() {
+  if (typeof pdfjsLib !== 'undefined') return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = '../vendor/pdfjs/pdf.min.js';
+    el.onload = resolve;
+    el.onerror = () => reject(new Error('PDF 引擎加载失败'));
+    document.head.appendChild(el);
+  });
+}
+
 async function parseResumeText() {
   const resumeTextArea = document.getElementById('resumeText');
   const resumeText = resumeTextArea.value.trim();
@@ -1771,6 +1848,9 @@ async function parseResumeText() {
     let parsedData;
     let parseResult = null;
     if (resumeFile) {
+      if (/\.pdf$/i.test(resumeFile.name) || resumeFile.type === 'application/pdf') {
+        await ensurePdfJs();
+      }
       parseResult = await resumeParser.parseFileWithAI(resumeFile, settings, {
         fallbackText: resumeText,
         onProgress: (progress) => handleAiParseProgress(progress, btn)
@@ -2049,7 +2129,7 @@ async function testOcrConnection() {
   }
   if (resultDiv) {
     resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<div style="color: #0071e3; font-size: 12px; padding: 6px 0;">正在连接硅基流动 DeepSeek-OCR 服务...</div>';
+    resultDiv.innerHTML = '<div style="color: #d97757; font-size: 12px; padding: 6px 0;">正在连接硅基流动 DeepSeek-OCR 服务...</div>';
   }
 
   try {
@@ -2207,9 +2287,9 @@ function renderSubmissionsList() {
   if (!filtered.length) {
     container.innerHTML = `
       <div class="submission-empty">
-        <div style="font-size: 28px; margin-bottom: 8px;">📬</div>
-        <div style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">暂无匹配的投递记录</div>
-        <div style="font-size: 12px;">在招聘网站点击插件「填充」时会自动提取记录，也可以点击上方「手动添加投递」</div>
+        <div style="font-size: 32px; margin-bottom: 10px;">📬</div>
+        <div style="font-size: 15px; font-weight: 650; color: var(--text-main); margin-bottom: 6px;">暂无匹配的投递记录</div>
+        <div style="font-size: 13px; color: var(--text-muted);">在招聘网站点击悬浮窗「⚡ 填充」时会自动提取记录，也可以点击右上角「+ 手动添加投递」</div>
       </div>
     `;
     return;
@@ -2220,45 +2300,88 @@ function renderSubmissionsList() {
     const card = document.createElement('div');
     card.className = 'submission-item-card';
 
-    const urlDisplay = sub.url ? `<a href="${attr(sub.url)}" target="_blank" rel="noreferrer" class="sub-link" title="${attr(sub.url)}">🔗 招聘网址</a>` : '';
-    const notesDisplay = sub.notes ? `<span class="sub-notes" title="${attr(sub.notes)}">📝 ${html(sub.notes)}</span>` : '';
+    const companyName = sub.company || '未知企业';
+    const positionName = sub.position || '网申岗位';
+    const dateStr = sub.date || new Date().toISOString().slice(0, 10);
+    const profileName = sub.profileName || '默认资料';
+    const currStatus = sub.status || '在投';
+
+    const urlDisplay = sub.url ? `
+      <a href="${attr(sub.url)}" target="_blank" rel="noreferrer" class="sub-link-chip" title="${attr(sub.url)}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+        <span>职位与网申网址</span>
+      </a>` : '';
+
+    const notesDisplay = sub.notes ? `
+      <div class="sub-notes-box">
+        <span class="notes-icon">📝</span>
+        <span class="notes-text" title="${attr(sub.notes)}"><strong>复盘/备注：</strong>${html(sub.notes)}</span>
+      </div>` : '';
 
     card.innerHTML = `
       <div class="sub-item-main">
         <div class="sub-item-top">
-          <span class="sub-company-name">${html(sub.company || '未知企业')}</span>
-          <span class="sub-position-name">${html(sub.position || '网申岗位')}</span>
+          <div class="sub-company-wrap">
+            <span class="sub-company-icon">🏢</span>
+            <span class="sub-company-name">${html(companyName)}</span>
+          </div>
+          <div class="sub-position-wrap">
+            <span class="sub-position-badge">🎯 ${html(positionName)}</span>
+          </div>
         </div>
         <div class="sub-item-meta">
-          <span class="sub-meta-pill">📅 ${html(sub.date || '未知日期')}</span>
-          <span class="sub-meta-pill">📄 资料: ${html(sub.profileName || '默认资料')}</span>
+          <span class="sub-meta-pill">📅 投递日期: ${html(dateStr)}</span>
+          <span class="sub-meta-pill">📄 资料: ${html(profileName)}</span>
           ${urlDisplay}
-          ${notesDisplay}
         </div>
+        ${notesDisplay}
       </div>
       <div class="sub-item-actions">
-        <select class="status-pill-select status-${attr(sub.status || '在投')}" data-id="${attr(sub.id)}" title="切换投递状态">
-          <option value="在投" ${sub.status === '在投' ? 'selected' : ''}>在投</option>
-          <option value="笔试" ${sub.status === '笔试' ? 'selected' : ''}>笔试</option>
-          <option value="面试" ${sub.status === '面试' ? 'selected' : ''}>面试</option>
-          <option value="Offer" ${sub.status === 'Offer' ? 'selected' : ''}>Offer</option>
-          <option value="挂了" ${sub.status === '挂了' ? 'selected' : ''}>挂了</option>
-        </select>
-        <button type="button" class="btn-icon-sub btn-edit-sub" data-id="${attr(sub.id)}" title="编辑投递记录">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        <div class="apple-status-dropdown-box" data-id="${attr(sub.id)}">
+          <button type="button" class="apple-status-pill status-${attr(currStatus)}" title="点击切换当前投递状态">
+            <span class="status-dot dot-${attr(currStatus)}"></span>
+            <span class="status-text">${html(currStatus)}</span>
+            <svg class="status-arrow" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="apple-status-menu">
+            <div class="apple-status-opt ${currStatus === '在投' ? 'active' : ''}" data-status="在投"><span class="opt-dot dot-在投"></span><span>在投</span>${currStatus === '在投' ? '<span class="check">✓</span>' : ''}</div>
+            <div class="apple-status-opt ${currStatus === '笔试' ? 'active' : ''}" data-status="笔试"><span class="opt-dot dot-笔试"></span><span>笔试</span>${currStatus === '笔试' ? '<span class="check">✓</span>' : ''}</div>
+            <div class="apple-status-opt ${currStatus === '面试' ? 'active' : ''}" data-status="面试"><span class="opt-dot dot-面试"></span><span>面试</span>${currStatus === '面试' ? '<span class="check">✓</span>' : ''}</div>
+            <div class="apple-status-opt ${currStatus === 'Offer' ? 'active' : ''}" data-status="Offer"><span class="opt-dot dot-Offer"></span><span>Offer</span>${currStatus === 'Offer' ? '<span class="check">✓</span>' : ''}</div>
+            <div class="apple-status-opt ${currStatus === '挂了' ? 'active' : ''}" data-status="挂了"><span class="opt-dot dot-挂了"></span><span>挂了</span>${currStatus === '挂了' ? '<span class="check">✓</span>' : ''}</div>
+          </div>
+        </div>
+        <button type="button" class="btn-icon-sub btn-edit-sub" data-id="${attr(sub.id)}" title="编辑投递详情与复盘">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
         </button>
-        <button type="button" class="btn-icon-sub btn-del-sub" data-id="${attr(sub.id)}" title="删除投递记录">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        <button type="button" class="btn-icon-sub btn-del-sub" data-id="${attr(sub.id)}" title="删除此条记录">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
       </div>
     `;
 
-    // 状态选择切换
-    const statusSelect = card.querySelector('.status-pill-select');
-    statusSelect.addEventListener('change', async (e) => {
-      const newStatus = e.target.value;
-      const subId = e.target.getAttribute('data-id');
-      await updateSubmissionStatus(subId, newStatus);
+    // 状态胶囊点击展开/收起
+    const statusBox = card.querySelector('.apple-status-dropdown-box');
+    const statusPill = card.querySelector('.apple-status-pill');
+    statusPill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = statusBox.classList.contains('is-open');
+      document.querySelectorAll('.apple-status-dropdown-box.is-open').forEach(b => b.classList.remove('is-open'));
+      document.querySelectorAll('.apple-custom-select-box.is-open').forEach(b => b.classList.remove('is-open'));
+      if (!isOpen) statusBox.classList.add('is-open');
+    });
+
+    // 状态选项切换
+    card.querySelectorAll('.apple-status-opt').forEach((opt) => {
+      opt.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        statusBox.classList.remove('is-open');
+        const newStatus = opt.getAttribute('data-status');
+        const subId = statusBox.getAttribute('data-id');
+        if (newStatus && newStatus !== currStatus) {
+          await updateSubmissionStatus(subId, newStatus);
+        }
+      });
     });
 
     // 编辑按钮
@@ -2313,7 +2436,7 @@ function openSubmissionEditModal(submission = null) {
   const compEl = document.getElementById('editSubmissionCompany');
   const posEl = document.getElementById('editSubmissionPosition');
   const dateEl = document.getElementById('editSubmissionDate');
-  const statusEl = document.getElementById('editSubmissionStatus');
+  const statusSelect = document.getElementById('editSubmissionStatus');
   const urlEl = document.getElementById('editSubmissionUrl');
   const notesEl = document.getElementById('editSubmissionNotes');
 
@@ -2323,7 +2446,7 @@ function openSubmissionEditModal(submission = null) {
     compEl.value = submission.company || '';
     posEl.value = submission.position || '';
     dateEl.value = submission.date || new Date().toISOString().slice(0, 10);
-    statusEl.value = submission.status || '在投';
+    statusSelect.value = submission.status || '在投';
     profileSelect.value = submission.profileId || activeProfileId;
     urlEl.value = submission.url || '';
     notesEl.value = submission.notes || '';
@@ -2333,11 +2456,22 @@ function openSubmissionEditModal(submission = null) {
     compEl.value = '';
     posEl.value = '';
     dateEl.value = new Date().toISOString().slice(0, 10);
-    statusEl.value = '在投';
+    statusSelect.value = '在投';
     profileSelect.value = activeProfileId;
     urlEl.value = '';
     notesEl.value = '';
   }
+
+  // 升级模态框内部下拉框为 Apple Select
+  profileSelect.removeAttribute('data-apple-select-initialized');
+  const oldBox1 = profileSelect.parentNode?.querySelector('.apple-custom-select-box');
+  if (oldBox1) oldBox1.remove();
+  upgradeToAppleSelect(profileSelect);
+
+  statusSelect.removeAttribute('data-apple-select-initialized');
+  const oldBox2 = statusSelect.parentNode?.querySelector('.apple-custom-select-box');
+  if (oldBox2) oldBox2.remove();
+  upgradeToAppleSelect(statusSelect);
 
   modal.style.display = 'block';
   compEl.focus();
@@ -2465,7 +2599,10 @@ function bindSubmissionEvents() {
     card.addEventListener('click', () => {
       const status = card.getAttribute('data-status') || 'all';
       submissionFilterStatus = status;
-      if (statusFilter) statusFilter.value = status;
+      if (statusFilter) {
+        statusFilter.value = status;
+        if (statusFilter._refreshAppleSelect) statusFilter._refreshAppleSelect();
+      }
       updateSubmissionStats();
       renderSubmissionsList();
     });
@@ -2532,7 +2669,7 @@ function initSidebarNav() {
   let scrollTimer = null;
   window.addEventListener('scroll', () => {
     if (scrollTimer) return;
-    scrollTimer = setTimeout(() => {
+    scrollTimer = requestAnimationFrame(() => {
       scrollTimer = null;
       const scrollPos = window.scrollY + 120;
       let currentSectionId = '';
@@ -2561,8 +2698,8 @@ function initSidebarNav() {
           l.classList.toggle('active', sec === currentSectionId);
         });
       }
-    }, 60);
-  });
+    });
+  }, { passive: true });
 }
 
 // ============================================================================
@@ -2615,15 +2752,19 @@ function initTabNav() {
       if (navKanbanActions) navKanbanActions.style.display = 'flex';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
       if (navPageBadge) navPageBadge.textContent = '投递看板';
-      updateSubmissionStats();
-      renderSubmissionsList();
+      requestAnimationFrame(() => {
+        updateSubmissionStats();
+        renderSubmissionsList();
+      });
     } else if (tabKey === 'logs') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
       if (navSaveBtn) navSaveBtn.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
       if (navPageBadge) navPageBadge.textContent = '运行日志';
-      renderLogList();
+      requestAnimationFrame(() => {
+        renderLogList();
+      });
     } else if (tabKey === 'help') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
       if (navSaveBtn) navSaveBtn.style.display = 'none';
@@ -2635,7 +2776,9 @@ function initTabNav() {
     if (updateUrl) {
       history.replaceState(null, null, '#' + tabKey);
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (window.scrollY > 40) {
+      window.scrollTo(0, 0);
+    }
   }
 
   tabs.forEach((tab) => {

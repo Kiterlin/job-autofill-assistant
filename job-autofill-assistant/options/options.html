@@ -1,9 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>资料配置中心 - Capybara网申助手</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('capybara-ui-theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -18,25 +26,32 @@
       <div class="nav-left">
         <img src="../icons/icon48.png" alt="logo" class="nav-logo">
         <span class="nav-title">Capybara网申助手</span>
-        <span class="nav-badge" id="navPageBadge">简历资料</span>
 
         <!-- 顶栏核心视图切换器 (靠左对齐，彻底杜绝与右侧重合) -->
         <div class="nav-tabs-pill" id="navTabsPill">
           <button type="button" class="nav-tab-btn active" data-tab="profile" id="tabBtnProfile">
-            <span class="tab-icon">📇</span>
+            <span class="tab-icon">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3.5"/><circle cx="9" cy="11" r="2.5"/><path d="M15 9h3M15 13h3M5.5 16.5c0-1.6 1.6-2.5 3.5-2.5s3.5.9 3.5 2.5"/></svg>
+            </span>
             <span class="tab-text">简历资料</span>
           </button>
           <button type="button" class="nav-tab-btn" data-tab="kanban" id="tabBtnKanban">
-            <span class="tab-icon">📊</span>
+            <span class="tab-icon">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8v8M12 8v5M17 8v3"/></svg>
+            </span>
             <span class="tab-text">投递看板</span>
             <span class="tab-badge" id="navKanbanCount">0</span>
           </button>
           <button type="button" class="nav-tab-btn" data-tab="logs" id="tabBtnLogs">
-            <span class="tab-icon">📜</span>
+            <span class="tab-icon">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M7 9h.01M11 9h6M7 13h.01M11 13h6M7 17h.01M11 17h6"/></svg>
+            </span>
             <span class="tab-text">运行日志</span>
           </button>
           <button type="button" class="nav-tab-btn" data-tab="help" id="tabBtnHelp">
-            <span class="tab-icon">💡</span>
+            <span class="tab-icon">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+            </span>
             <span class="tab-text">使用说明</span>
           </button>
         </div>
@@ -47,7 +62,9 @@
         <div class="nav-profile-group" id="navProfileGroup">
           <div class="nav-custom-dropdown" id="navProfileDropdown">
             <button type="button" class="nav-dropdown-trigger" id="navProfileDropdownBtn" title="切换简历资料">
-              <span class="nav-profile-badge">📇</span>
+              <span class="nav-profile-badge">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3.5"/><circle cx="9" cy="11" r="2.5"/><path d="M15 9h3M15 13h3M5.5 16.5c0-1.6 1.6-2.5 3.5-2.5s3.5.9 3.5 2.5"/></svg>
+              </span>
               <span class="nav-profile-name" id="navSelectedProfileName">默认资料</span>
               <svg class="nav-dropdown-arrow" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4">
                 <polyline points="6 9 12 15 18 9"></polyline>
@@ -123,7 +140,9 @@
   <!-- 屏幕左边缘悬浮抽屉式目录导航栏 (仅在简历配置视图有效) -->
   <aside class="sidebar-drawer" id="sidebarDrawer" title="点击或鼠标悬停查看页面目录">
     <div class="drawer-handle">
-      <span class="drawer-icon">📑</span>
+      <span class="drawer-icon">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      </span>
       <span class="drawer-label">
         <span>目</span>
         <span>录</span>
@@ -131,43 +150,61 @@
     </div>
     <div class="drawer-content">
       <div class="sidebar-header">
-        <span class="sidebar-title">📑 简历模块快速直达</span>
+        <span class="sidebar-title">简历模块快速直达</span>
       </div>
       <nav class="sidebar-menu">
         <a href="#section-ai" class="sidebar-link active" data-section="section-ai">
-          <span class="nav-icon">⚡</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12.8 2.2c-.3-.5-1-.3-1.1.2L8.2 12.3c-.1.3.1.6.4.6h3.8l-1.9 8.7c-.2.7.7 1.1 1.1.5l7.2-9.9c.3-.4 0-.9-.5-.9h-3.8l2.5-8.6c.1-.2 0-.5-.2-.7z"/></svg>
+          </span>
           <span class="nav-text">AI 模型配置</span>
         </a>
         <a href="#section-parser" class="sidebar-link" data-section="section-parser">
-          <span class="nav-icon">📄</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </span>
           <span class="nav-text">源文件 & AI 解析</span>
         </a>
         <a href="#section-basic" class="sidebar-link" data-section="section-basic">
-          <span class="nav-icon">📇</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3.5"/><circle cx="9" cy="11" r="2.5"/><path d="M15 9h3M15 13h3M5.5 16.5c0-1.6 1.6-2.5 3.5-2.5s3.5.9 3.5 2.5"/></svg>
+          </span>
           <span class="nav-text">基础个人信息</span>
         </a>
         <a href="#section-intention" class="sidebar-link" data-section="section-intention">
-          <span class="nav-icon">🎯</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          </span>
           <span class="nav-text">求职意向与语言</span>
         </a>
         <a href="#section-awards" class="sidebar-link" data-section="section-awards">
-          <span class="nav-icon">🏆</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>
+          </span>
           <span class="nav-text">荣誉奖项经历</span>
         </a>
         <a href="#section-education" class="sidebar-link" data-section="section-education">
-          <span class="nav-icon">🎓</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+          </span>
           <span class="nav-text">教育背景经历</span>
         </a>
         <a href="#section-work" class="sidebar-link" data-section="section-work">
-          <span class="nav-icon">💼</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          </span>
           <span class="nav-text">工作/实习经历</span>
         </a>
         <a href="#section-projects" class="sidebar-link" data-section="section-projects">
-          <span class="nav-icon">🚀</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 15 2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          </span>
           <span class="nav-text">项目实战经历</span>
         </a>
         <a href="#section-skills" class="sidebar-link" data-section="section-skills">
-          <span class="nav-icon">💡</span>
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M10 2.5a.6.6 0 0 1 .5.3l1.8 3.9a3.8 3.8 0 0 0 2 2l3.9 1.8a.6.6 0 0 1 0 1l-3.9 1.8a3.8 3.8 0 0 0-2 2L10.5 21a.6.6 0 0 1-1 0l-1.8-3.9a3.8 3.8 0 0 0-2-2L1.8 13.3a.6.6 0 0 1 0-1l3.9-1.8a3.8 3.8 0 0 0 2-2L9.5 2.8a.6.6 0 0 1 .5-.3z"/></svg>
+          </span>
           <span class="nav-text">技能与自我介绍</span>
         </a>
       </nav>
@@ -965,7 +1002,7 @@
           </div>
           <div class="form-group">
             <label>备注与面试复盘记录</label>
-            <input type="text" id="editSubmissionNotes" placeholder="例如: 内推人张三 / 一面手撕二叉树 / HR 面已过等待审批...">
+            <textarea id="editSubmissionNotes" rows="3" placeholder="例如: 内推人张三 / 一面手撕二叉树 / HR 面已过等待审批..."></textarea>
           </div>
           <div class="modal-btn-row">
             <button type="button" id="cancelSubmissionEditBtn" class="btn-glass-sm">取消</button>
@@ -1031,8 +1068,8 @@
         <section class="section glass help-card-section">
           <div class="section-header">
             <div class="section-title-wrap">
-              <div class="section-icon" style="background: rgba(0, 113, 227, 0.1); color: #0071e3;">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              <div class="section-icon ai-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               </div>
               <div>
                 <h2 class="section-title">🚀 极速上手流程</h2>
@@ -1148,8 +1185,6 @@
 
   <div id="toast" class="toast" style="display: none;"></div>
 
-  <script src="../vendor/pdfjs/pdf.min.js"></script>
-  <script src="../scripts/storage.js"></script>
   <script src="../scripts/app-log.js"></script>
   <script src="../scripts/resume-parser.js"></script>
   <script src="options.js"></script>

@@ -27,7 +27,9 @@ function preferredTheme() {
 }
 
 function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  const mode = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', mode);
+  try { localStorage.setItem('capybara-ui-theme', mode); } catch (e) {}
 }
 
 async function initTheme() {
@@ -147,6 +149,33 @@ function bindEvents() {
     themeBtn.addEventListener('click', toggleTheme);
   }
 
+  // 页面悬浮窗开关
+  const dockToggleBtn = document.getElementById('dockToggleBtn');
+  if (dockToggleBtn) {
+    dockToggleBtn.addEventListener('click', async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !tab.id) {
+          showToast('请在招聘网申网页中使用', 'info');
+          return;
+        }
+        chrome.tabs.sendMessage(tab.id, { action: 'toggleDock' }, (res) => {
+          if (chrome.runtime.lastError) {
+            showToast('请刷新目标网页（F5）以载入悬浮窗', 'warning');
+            return;
+          }
+          if (res && res.visible) {
+            showToast('已在当前网页开启悬浮窗 🦫', 'success');
+          } else {
+            showToast('已在当前网页关闭悬浮窗', 'info');
+          }
+        });
+      } catch (e) {
+        showToast('操作失败: ' + e.message, 'error');
+      }
+    });
+  }
+
   // 苹果风自定义下拉触发
   const dropdownBtn = document.getElementById('profileDropdownBtn');
   if (dropdownBtn) {
@@ -237,10 +266,16 @@ function bindEvents() {
     });
   }
 
-  // 填充按钮
+  // 填充按钮 (毫秒级快填)
   const fillBtn = document.getElementById('fillBtn');
   if (fillBtn) {
     fillBtn.addEventListener('click', fillCurrentPage);
+  }
+
+  // AI 逐步深度填充按钮
+  const aiFillBtn = document.getElementById('aiFillBtn');
+  if (aiFillBtn) {
+    aiFillBtn.addEventListener('click', aiStepFillCurrentPage);
   }
 
   // 配置按钮 - 打开配置页面
@@ -344,21 +379,6 @@ async function fillCurrentPage() {
       return;
     }
 
-    // 先尝试注入 content script
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['scripts/content.js']
-      });
-      await chrome.scripting.insertCSS({
-        target: { tabId: tab.id },
-        files: ['styles/content.css']
-      });
-      await new Promise(resolve => setTimeout(resolve, 120));
-    } catch (e) {
-      console.log('[Popup] Content script 注入略过或已存在:', e);
-    }
-
     // 发送消息到 content script
     chrome.tabs.sendMessage(tab.id, {
       action: 'fillForm',
@@ -390,6 +410,57 @@ async function fillCurrentPage() {
     console.error('[Popup] 填充错误:', error);
     if (typeof appLog !== 'undefined') appLog.error('popup', 'fill.fail', '填充失败', error.message);
     showToast('填充失败：' + error.message, 'error');
+  }
+}
+
+// AI 逐步深度填充当前页面
+async function aiStepFillCurrentPage() {
+  const btn = document.getElementById('aiFillBtn');
+  const loading = document.getElementById('loadingState');
+
+  try {
+    if (!currentProfile) {
+      showToast('请先选择或创建简历资料', 'warning');
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+    if (loading) {
+      loading.querySelector('.loading-text').textContent = '正在启动 AI 逐步智能解析...';
+      loading.style.display = 'flex';
+    }
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) {
+      if (btn) btn.disabled = false;
+      if (loading) loading.style.display = 'none';
+      showToast('未找到有效标签页', 'error');
+      return;
+    }
+
+    chrome.tabs.sendMessage(tab.id, {
+      action: 'aiStepByStepFill',
+      profile: currentProfile
+    }, (response) => {
+      if (btn) btn.disabled = false;
+      if (loading) loading.style.display = 'none';
+
+      if (chrome.runtime.lastError || !response) {
+        showToast('💡 请刷新当前网申网页（按 F5）以加载最新 AI 助填引擎！', 'warning');
+        return;
+      }
+
+      if (response && response.success) {
+        showToast(`🎉 AI 逐步智能填充完成！`, 'success');
+        updateLastUsed();
+      } else {
+        showToast(response?.error || 'AI 填充完成', 'info');
+      }
+    });
+  } catch (error) {
+    if (btn) btn.disabled = false;
+    if (loading) loading.style.display = 'none';
+    showToast('AI 填充失败：' + error.message, 'error');
   }
 }
 

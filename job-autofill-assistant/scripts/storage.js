@@ -593,11 +593,11 @@ class StorageManager {
       const date = submissionData.date || today;
       const notes = submissionData.notes || '';
 
-      // 查重：若当天已有同一网址或同公司同岗位的记录，则更新其信息，避免重复刷屏
+      // 查重：仅当公司名称与岗位名称完全一致且在同一天时才更新，确保同一公司的不同岗位能够各自独立记录在看板上
       const existingIndex = data.submissions.findIndex((s) => {
-        if (url && s.url && s.url === url && s.date === date) return true;
-        if (s.company === company && s.position === position && s.date === date) return true;
-        return false;
+        const sameCompany = s.company && company && s.company.toLowerCase().trim() === company.toLowerCase().trim();
+        const samePosition = s.position && position && s.position.toLowerCase().trim() === position.toLowerCase().trim();
+        return sameCompany && samePosition && s.date === date;
       });
 
       if (existingIndex !== -1) {
@@ -605,14 +605,14 @@ class StorageManager {
           ...data.submissions[existingIndex],
           company,
           position,
-          url,
+          url: url || data.submissions[existingIndex].url,
           profileName,
           profileId,
           status: data.submissions[existingIndex].status || status,
           updatedAt: new Date().toISOString()
         };
         await this.saveAll(data);
-        console.log('[存储] 更新已有投递记录:', company, position);
+        console.log('[存储] 更新同公司同岗位投递记录:', company, position);
         return data.submissions[existingIndex];
       }
 

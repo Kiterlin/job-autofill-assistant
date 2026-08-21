@@ -108,6 +108,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       persistLogEntries([request.entry]).then(() => sendResponse({ success: true }));
       return true;
 
+    case 'openOptions':
+      chrome.runtime.openOptionsPage();
+      sendResponse({ success: true });
+      return true;
+
+    case 'aiGenerate':
+      handleAiGenerate(request.prompt, request.systemPrompt, sendResponse, request.maxTokens);
+      return true;
+
     case 'appendLogs':
       persistLogEntries(request.entries || []).then(() => sendResponse({ success: true }));
       return true;
@@ -130,6 +139,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // ============================================================================
 // 消息处理函数
 // ============================================================================
+
+async function handleAiGenerate(prompt, systemPrompt, sendResponse, maxTokens) {
+  try {
+    const settings = await storageManager.getSettings();
+    if (!settings.aiEnabled || !settings.aiApiKey) {
+      sendResponse({
+        success: false,
+        error: 'AI_NOT_CONFIGURED',
+        message: '请先在插件设置中启用 AI 并配置 API Key'
+      });
+      return;
+    }
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push({ role: 'user', content: prompt });
+    const reply = await resumeParser.chat(settings, messages, {
+      temperature: 0.3,
+      maxTokens: Math.min(Number(maxTokens) || 400, 800),
+      enableThinking: false
+    });
+    sendResponse({ success: true, text: reply });
+  } catch (error) {
+    sendResponse({
+      success: false,
+      error: error.message || 'AI 生成失败'
+    });
+  }
+}
 
 async function handleGetActiveProfile(sendResponse) {
   try {
