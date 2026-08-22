@@ -1734,16 +1734,20 @@ body {
 
 .form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
 .form-row-3 {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .form-row-4 {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.form-row-identity {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.45fr) minmax(0, 1.25fr);
 }
 
 input[type="text"],
@@ -3026,7 +3030,9 @@ textarea {
 
 @media (max-width: 820px) {
   .form-row,
-  .form-row-4 {
+  .form-row-3,
+  .form-row-4,
+  .form-row-identity {
     grid-template-columns: 1fr;
   }
 
@@ -3048,33 +3054,91 @@ textarea {
 /* 出生日期极速年月日选择器 */
 .birthdate-picker-wrap {
   display: grid;
-  grid-template-columns: 1.15fr 0.95fr 0.95fr;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr) minmax(0, 0.95fr);
   gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.birthdate-picker-wrap .select-box {
+  min-width: 0;
+  position: relative;
+}
+
+.birthdate-picker-wrap .apple-custom-select-box {
+  min-width: 0;
   width: 100%;
 }
 
 .birthdate-picker-wrap .apple-custom-select-trigger {
-  padding: 0 8px 0 10px;
+  padding: 0 6px 0 8px;
   font-size: 13px;
   height: 38px;
+  min-width: 0;
+  gap: 3px;
 }
 
 .birthdate-picker-wrap .apple-custom-select-label {
-  font-size: 13px;
+  font-size: 12.5px;
+  min-width: 0;
+  text-align: center;
 }
 
 .birthdate-picker-wrap .apple-custom-select-arrow {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
 }
 
+/* 出生日期下拉弹层：自适应舒适宽度，防止文字被窄卡片挤压 */
 .birthdate-picker-wrap .apple-custom-select-popover {
   max-height: 200px;
+  min-width: 84px;
+  width: max-content;
+  max-width: 140px;
+  padding: 4px 3px 4px 4px;
+}
+
+/* 年份宽度稍大且靠左展开 */
+.birthdate-picker-wrap .select-box:first-child .apple-custom-select-popover {
+  min-width: 92px;
+  left: 0;
+  right: auto;
+}
+
+/* 月份靠左展开 */
+.birthdate-picker-wrap .select-box:nth-child(2) .apple-custom-select-popover {
+  min-width: 84px;
+  left: 0;
+  right: auto;
+}
+
+/* 日期靠右对齐展开，防止向右溢出卡片右边界 */
+.birthdate-picker-wrap .select-box:nth-child(3) .apple-custom-select-popover {
+  min-width: 84px;
+  right: 0;
+  left: auto;
+}
+
+.birthdate-picker-wrap .apple-custom-select-option {
+  height: 30px;
+  padding: 0 6px 0 8px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.birthdate-picker-wrap .apple-custom-select-option .option-check {
+  font-size: 11px;
+  margin-left: 4px;
+  flex-shrink: 0;
 }
 
 .apple-custom-select-box {
   position: relative;
   width: 100%;
+  min-width: 0;
 }
 
 .apple-custom-select-trigger {
@@ -3096,6 +3160,7 @@ textarea {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 [data-theme="light"] .apple-custom-select-trigger {
@@ -3149,6 +3214,7 @@ textarea {
   font-weight: 450;
   line-height: 1.35;
   letter-spacing: -0.01em;
+  min-width: 0;
 }
 
 .apple-custom-select-arrow {
@@ -3184,6 +3250,39 @@ textarea {
   gap: 2px;
   max-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 140, 140, 0.35) transparent;
+}
+
+/* 苹果风格极细滑动条 (5px)，避免宽大原生滚动条遮挡选项文字和勾选框 */
+.apple-custom-select-popover::-webkit-scrollbar {
+  width: 5px;
+}
+
+.apple-custom-select-popover::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.apple-custom-select-popover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+}
+
+.apple-custom-select-popover::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="dark"] .apple-custom-select-popover {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+[data-theme="dark"] .apple-custom-select-popover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+[data-theme="dark"] .apple-custom-select-popover::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.38);
 }
 
 .apple-custom-select-box.is-open .apple-custom-select-popover {

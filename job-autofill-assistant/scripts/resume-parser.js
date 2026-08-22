@@ -75,7 +75,30 @@ function emitLog(level, event, message, detail) {
 
 class ResumeParser {
   constructor() {
+    this.activeController = null;
     this.initPdfWorker();
+  }
+
+  // 中断当前正在进行的解析（所有进行中的 API 请求会立即取消）
+  cancelActiveParse() {
+    if (this.activeController) {
+      this.activeController.abort();
+      this.activeController = null;
+    }
+  }
+
+  // 复用进行中的取消句柄；独立调用时自建，结束后清理
+  async withController(fn) {
+    const owns = !this.activeController;
+    if (owns) this.activeController = new AbortController();
+    try {
+      return await fn();
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw new Error('解析已取消');
+      throw error;
+    } finally {
+      if (owns) this.activeController = null;
+    }
   }
 
   initPdfWorker() {
@@ -264,7 +287,19 @@ class ResumeParser {
   }
 
   sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const signal = this.activeController && this.activeController.signal;
+    if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error('解析已取消'));
+        return;
+      }
+      const timer = setTimeout(resolve, ms);
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('解析已取消'));
+      }, { once: true });
+    });
   }
 
   isBusyError(error) {
@@ -297,6 +332,7 @@ class ResumeParser {
       const safeUrl = typeof appLogSafeUrl === 'function' ? appLogSafeUrl(url) : String(url).split('?')[0];
       emitLog('info', 'model.request', `${label} 请求开始（第 ${attempt}/${maxAttempts} 次）`, { url: safeUrl });
       try {
+        if (this.activeController) init.signal = this.activeController.signal;
         const response = await fetch(url, init);
         const text = await response.text();
         const ms = Date.now() - started;
@@ -315,6 +351,10 @@ class ResumeParser {
         if (!this.isBusyError(err) || attempt === maxAttempts) throw err;
         console.warn(`[${label}] ${response.status}，${attempt}/${maxAttempts} 次，稍后重试`);
       } catch (error) {
+        if (error && error.name === 'AbortError') {
+          emitLog('info', 'model.cancel', `${label} 请求已取消`);
+          throw new Error('解析已取消');
+        }
         if (error && error.name === 'TypeError' && /fetch/i.test(error.message || '')) {
           lastError = new Error(`${label} 网络中断或请求被浏览器限流，请等待几秒再试，不要连续点击`);
         } else {
@@ -339,7 +379,9 @@ class ResumeParser {
     if (options.enableThinking === false && settings.aiProvider === 'siliconflow') {
       body.enable_thinking = false;
     }
-    if (options.jsonMode && provider.jsonMode) {
+    // 思考型模型普遍不支持 JSON 强制模式（会直接报错），改为靠提示词约束输出
+    const isReasoningModel = /(reasoner|thinking|r1|qwq)/i.test(provider.model || '');
+    if (options.jsonMode && provider.jsonMode && !isReasoningModel) {
       body.response_format = { type: 'json_object' };
     }
 
@@ -354,6 +396,9 @@ class ResumeParser {
 
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       throw new Error(`${provider.label} 返回数据格式异常`);
+    }
+    if (data.choices[0].finish_reason === 'length') {
+      throw new Error(`${provider.label} 输出被截断（超出模型最大输出），请换更强的模型或精简简历后重试`);
     }
     const message = data.choices[0].message;
     const content = typeof message.content === 'string' ? message.content.trim() : '';
@@ -565,19 +610,23 @@ class ResumeParser {
 
   async testOcrConnection(apiKey) {
     if (!apiKey || !apiKey.trim()) throw new Error('请先输入硅基流动 API Key');
-    const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey.trim()}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'deepseek-ai/DeepSeek-OCR',
-        messages: [{
-          role: 'user',
-          content: 'Hello, reply OK'
-        }]
-      })
+    const response = await this.withController(() => {
+      const init = {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'deepseek-ai/DeepSeek-OCR',
+          messages: [{
+            role: 'user',
+            content: 'Hello, reply OK'
+          }]
+        })
+      };
+      if (this.activeController) init.signal = this.activeController.signal;
+      return fetch('https://api.siliconflow.cn/v1/chat/completions', init);
     });
 
     if (!response.ok) {
@@ -644,15 +693,22 @@ class ResumeParser {
     if (this.isPdfFile(file)) {
       this.notifyProgress(onProgress, 'ocr', '正在将 PDF 转为图片并识别…');
       const pages = await this.renderPdfPagesToPng(file);
-      const texts = [];
-      for (let i = 0; i < pages.length; i++) {
-        this.notifyProgress(onProgress, 'ocr', `正在识别第 ${i + 1}/${pages.length} 页…`);
+      const texts = new Array(pages.length).fill('');
+      let doneCount = 0;
+      // 限并发并行识别，单页失败只丢弃该页
+      const runPage = async (i) => {
         try {
-          texts.push(await this.ocrImageBase64(pages[i].base64, pages[i].mime, apiKey));
+          texts[i] = await this.ocrImageBase64(pages[i].base64, pages[i].mime, apiKey);
         } catch (error) {
           emitLog('warn', 'ocr.page-skip', `第 ${i + 1} 页 OCR 丢弃`, error.message);
         }
-      }
+        doneCount += 1;
+        this.notifyProgress(onProgress, 'ocr', `已完成 ${doneCount}/${pages.length} 页 OCR`);
+      };
+      const lanes = Math.min(3, pages.length);
+      await Promise.all(Array.from({ length: lanes }, (_, k) => (async () => {
+        for (let i = k; i < pages.length; i += lanes) await runPage(i);
+      })()));
       const merged = texts.join('\n\n');
       if (!this.hasUsableText(merged) || this.looksLikeBadOcr(merged)) {
         throw new Error('OCR 没有得到可用文档内容');
@@ -683,12 +739,24 @@ class ResumeParser {
       model: settings.aiModel
     });
 
+    // 本次解析的取消句柄：重新上传/切换资料时可通过 cancelActiveParse() 中断
+    const controller = new AbortController();
+    this.activeController = controller;
+    try {
+      return await this.parseFileWithAIInner(file, settings, { fallbackText, onProgress, fileName });
+    } finally {
+      if (this.activeController === controller) this.activeController = null;
+    }
+  }
+
+  async parseFileWithAIInner(file, settings, { fallbackText, onProgress, fileName }) {
     if (this.canSendFileDirect(settings, file)) {
       try {
         this.notifyProgress(onProgress, 'direct', '正在让模型直接读取原始文件…');
         const data = await this.parseDirectFile(file, settings);
         return { data, inputMode: 'file', fileName };
       } catch (error) {
+        if (error.message === '解析已取消') throw error;
         console.warn('[简历解析] 直接读取文件失败，准备回退:', error.message);
         this.notifyProgress(onProgress, 'fallback', '多模态直读失败，准备 OCR 或本地抽字…');
       }
@@ -712,6 +780,7 @@ class ResumeParser {
         }
         this.notifyProgress(onProgress, 'ocr-fallback', 'OCR 结果不可用，改为本地抽字…');
       } catch (error) {
+        if (error.message === '解析已取消') throw error;
         console.warn('[简历解析] OCR 失败，回退本地抽字:', error.message);
         this.notifyProgress(onProgress, 'ocr-fallback', 'OCR 未成功，改为本地抽字…');
       }
@@ -748,7 +817,7 @@ class ResumeParser {
   buildPrompt(resumeText) {
     return `从下面的简历中提取全部结构化信息，返回一个合法的 JSON 对象。
 
-必须返回严格合法的 JSON，不要包含任何 markdown 代码块标记（不要包含 \`\`\`json），不要输出额外解释。字段在简历中未提及可用 "" 或 []。
+必须返回严格合法的 JSON，不要包含任何 markdown 代码块标记（不要包含 \`\`\`json），不要输出额外解释。字段在简历中未提及一律留空（"" 或 []），严禁编造、推测或用默认值填充。
 
 JSON schema 规范：
 {
@@ -805,27 +874,26 @@ JSON schema 规范：
     {"name":"","role":"","projectType":"商业项目/科研课题/竞赛获奖/开源项目/课程设计","techStack":"","startDate":"","endDate":"","projectUrl":"","description":"","responsibilities":"","achievements":""}
   ],
   "skills": [],
-  "introduction": "",
-  "hrGreeting": ""
+  "introduction": ""
 }
 
 提取规则：
 1. phone 只保留纯数字（如 13800138000）
-2. 日期统一采用 YYYY-MM 或 YYYY-MM-DD
-3. degree 统一规范为：大专 / 本科 / 硕士 / 博士
-4. politicalStatus 如有提及规范为：中共党员 / 中共预备党员 / 共青团员 / 群众 / 民主党派
-5. 四六级如有成绩（如 CET-6 580），填入 languageSkills.cet6 为 "580分" 或 "通过"
-6. education/workExperience/projects/awards 只输出真实有效条目，无内容返回 []
-7. 项目经历规范解耦提取（至关重要）：
-   - description: 仅包含项目背景与系统定位概述（1~3句话说明该项目是什么、解决什么业务痛点）。严禁把个人工作职责和成果混入 description！
-   - responsibilities: 提取个人在项目中的具体职责、分工内容、核心模块开发与难点攻关（条理分明列出，如 ●构建50w条语料微调Bert模型...）。
-   - achievements: 提炼项目的核心量化成果与业务成效指标（如 准确率提升至90%、延迟降低50ms、高并发支持等）。
-   - techStack: 提取该项目使用的核心技术、框架与工具清单（逗号分隔，如 Bert, PyTorch, Redis, FastAPI）。
-   - role: 担任角色（如 核心算法开发者 / 项目负责人 / 前端开发）。
-8. 工作/实习经历规范提取：
+2. 姓名：中文姓名 lastName 取第一个字（姓）、firstName 取其余部分；英文姓名 lastName 为姓、firstName 为名
+3. 日期统一采用 YYYY-MM（能确定到日才用 YYYY-MM-DD）；在读/在职等未写明结束时间的 endDate 一律填 "至今"
+4. degree 统一规范为：大专 / 本科 / 硕士 / 博士
+5. politicalStatus 如有提及规范为：中共党员 / 中共预备党员 / 共青团员 / 群众 / 民主党派
+6. 四六级：有具体分数填 "XXX分"（如 CET-6 580 填 "580分"），仅写通过无分数填 "通过"，未提及填 ""
+7. education/workExperience/projects/awards 只输出简历中真实存在的条目，无内容返回 []
+8. 项目经历规范解耦提取（至关重要），三字段分工示例：
+   - description: 仅项目背景与系统定位，1~3 句话。示例："面向电商场景的智能客服系统，解决大促期间人工客服响应慢的问题。"
+   - responsibilities: 个人具体职责，分条列出。示例："●构建50w条语料微调Bert模型\\n●设计双路召回与重排策略\\n●负责推理服务的高并发改造"
+   - achievements: 量化成果。示例："意图识别准确率提升至90%\\n平均响应延迟降低50ms"
+   严禁把职责和成果混入 description。techStack 为技术清单（如 Bert, PyTorch, Redis, FastAPI）；role 为担任角色（如 核心算法开发者 / 项目负责人）。
+9. 工作/实习经历规范提取：
    - description: 核心工作内容与岗位职责（分条列出）。
    - achievements: 实习产出与量化业务成果。
-9. hrGreeting：根据简历提炼一段用于 BOSS直聘/智联等招聘软件直接发给 HR 的打招呼语。包含：姓名、学校学历与专业、工作/实习（几段+简要概括）、项目经历（几个+简要概括）、重要大奖（仅限国奖、优秀毕业生、四六级550+、数学建模/ACM/计算机大赛一二三等奖等硬核大奖，过滤掉校内普通小奖）、个人优势。严格压缩在 200 字以内（履历极多时不得超过 300 字），真诚专业。
+10. 忽略简历中的排版符号（**、#、表格线等 Markdown/OCR 残留），只提取语义内容。
 
 简历内容：
 ${resumeText}`;
@@ -839,7 +907,7 @@ ${resumeText}`;
     const messages = [
       {
         role: 'system',
-        content: 'You are a resume extraction and career consulting API. Output a single JSON object strictly matching the schema. No markdown wrapping.'
+        content: 'You are a resume extraction API. Output a single JSON object strictly matching the schema. No markdown wrapping.'
       },
       { role: 'user', content: prompt }
     ];
@@ -849,35 +917,41 @@ ${resumeText}`;
       model: settings.aiModel,
       chars: String(resumeText || '').length
     });
-    let content;
-    try {
-      content = await this.chat(settings, messages, { jsonMode: true });
+
+    return this.withController(async () => {
       try {
-        const parsed = this.parseAIResponse(content);
-        emitLog('success', 'parse.done', '结构化提取成功', {
-          name: parsed.basicInfo && parsed.basicInfo.fullName,
-          education: (parsed.education || []).length,
-          skills: (parsed.skills || []).length
-        });
-        return parsed;
-      } catch (firstError) {
-        console.warn('[简历解析] JSON 不合法，要求模型重发:', firstError.message);
-        emitLog('warn', 'parse.retry-json', '模型返回 JSON 不合法，正在要求重发', firstError.message);
-        const retry = await this.chat(settings, [
-          ...messages,
-          { role: 'assistant', content: String(content || '') },
-          { role: 'user', content: '上一份回复不是合法 JSON（数组元素之间可能缺逗号或被截断）。请只返回完整且可解析的 JSON 对象，不要 markdown，不要解释。' }
-        ], { jsonMode: true });
-        const parsed = this.parseAIResponse(retry);
-        emitLog('success', 'parse.done', 'JSON 重发后解析成功', {
-          name: parsed.basicInfo && parsed.basicInfo.fullName
-        });
-        return parsed;
+        let content;
+        try {
+          content = await this.chat(settings, messages, { jsonMode: true });
+          const parsed = this.parseAIResponse(content);
+          emitLog('success', 'parse.done', '结构化提取成功', {
+            name: parsed.basicInfo && parsed.basicInfo.fullName,
+            education: (parsed.education || []).length,
+            skills: (parsed.skills || []).length
+          });
+          return parsed;
+        } catch (firstError) {
+          if (firstError.message === '解析已取消') throw firstError;
+          console.warn('[简历解析] JSON 不合法，要求模型重发:', firstError.message);
+          emitLog('warn', 'parse.retry-json', '模型返回 JSON 不合法，正在要求重发', firstError.message);
+          const retry = await this.chat(settings, [
+            ...messages,
+            { role: 'assistant', content: String(content || '') },
+            { role: 'user', content: '上一份回复不是合法 JSON（数组元素之间可能缺逗号或被截断）。请只返回完整且可解析的 JSON 对象，不要 markdown，不要解释。' }
+          ], { jsonMode: true });
+          const parsed = this.parseAIResponse(retry);
+          emitLog('success', 'parse.done', 'JSON 重发后解析成功', {
+            name: parsed.basicInfo && parsed.basicInfo.fullName
+          });
+          return parsed;
+        }
+      } catch (error) {
+        if (error.message !== '解析已取消') {
+          emitLog('error', 'parse.fail', '结构化提取失败', error.message);
+        }
+        throw error;
       }
-    } catch (error) {
-      emitLog('error', 'parse.fail', '结构化提取失败', error.message);
-      throw error;
-    }
+    });
   }
 
   parseAIResponse(content) {
@@ -966,15 +1040,15 @@ ${resumeText}`;
       },
       awards: arr(data.awards).map((a) => ({
         name: str(a.name || a.title),
-        level: str(a.level || '校级'),
+        level: str(a.level),
         date: str(a.date || a.time)
       })).filter((a) => a.name),
       education: arr(data.education).map((e) => ({
         school: str(e.school),
         college: str(e.college || e.department),
         major: str(e.major),
-        degree: str(e.degree || '本科'),
-        degreeType: str(e.degreeType || '普通全日制统招'),
+        degree: str(e.degree),
+        degreeType: str(e.degreeType),
         startDate: str(e.startDate || e.start),
         endDate: str(e.endDate || e.end),
         gpa: str(e.gpa),
@@ -985,7 +1059,7 @@ ${resumeText}`;
         company: str(w.company),
         department: str(w.department),
         position: str(w.position),
-        workType: str(w.workType || '实习'),
+        workType: str(w.workType),
         city: str(w.city),
         startDate: str(w.startDate || w.start),
         endDate: str(w.endDate || w.end),
@@ -1040,7 +1114,7 @@ ${resumeText}`;
         return {
           name: str(p.name),
           role: str(p.role),
-          projectType: str(p.projectType || '商业项目'),
+          projectType: str(p.projectType),
           techStack: tech,
           startDate: str(p.startDate || p.start),
           endDate: str(p.endDate || p.end),
@@ -1051,8 +1125,7 @@ ${resumeText}`;
         };
       }).filter((p) => p.name),
       skills: arr(data.skills).map(str).filter(Boolean),
-      introduction: str(data.introduction),
-      hrGreeting: str(data.hrGreeting)
+      introduction: str(data.introduction)
     };
 
     if (cleaned.basicInfo.fullName && !cleaned.basicInfo.lastName && !cleaned.basicInfo.firstName) {
@@ -1099,10 +1172,10 @@ ${typeof profileData === 'string' ? profileData : JSON.stringify(profileData, nu
       }
     ];
 
-    const content = await this.chat(settings, messages, {
+    const content = await this.withController(() => this.chat(settings, messages, {
       jsonMode: false,
       temperature: 0.3
-    });
+    }));
 
     return String(content || '').trim().replace(/^["'`]|["'`]$/g, '');
   }

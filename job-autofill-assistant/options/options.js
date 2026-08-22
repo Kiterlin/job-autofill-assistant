@@ -12,6 +12,13 @@ let ocrSaveTimer = null;
 let profileSaveTimer = null;
 let modelFetchSeq = 0;
 let selectedAiResumeFile = null;
+// 每次解析/取消都递增；旧解析完成后发现序号变了就丢弃结果，防止过期数据写入表单
+let aiParseRunSeq = 0;
+
+function cancelOngoingAiParse() {
+  resumeParser.cancelActiveParse();
+  aiParseRunSeq++;
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   // 1. 并发并行获取设置、简历资料与投递记录，彻底消除多重 IPC 串行往返延迟
@@ -672,6 +679,10 @@ function upgradeToAppleSelect(select) {
     if (!isOpen) {
       renderOptions();
       box.classList.add('is-open');
+      const selItem = popover.querySelector('.apple-custom-select-option.selected');
+      if (selItem) {
+        selItem.scrollIntoView({ block: 'nearest' });
+      }
     } else {
       box.classList.remove('is-open');
     }
@@ -1310,6 +1321,7 @@ function bindEvents() {
   if (resumeText) {
     resumeText.addEventListener('input', () => {
       if (!selectedAiResumeFile) return;
+      cancelOngoingAiParse();
       selectedAiResumeFile = null;
       if (aiResumeFile) aiResumeFile.value = '';
       setAiFileStatus('已切换为粘贴文本模式，将直接解析下方文字。', 'text');
@@ -1743,6 +1755,7 @@ function setAiFileStatus(message, state = 'selected') {
 }
 
 function clearSelectedAiResumeFile({ keepStatus = false } = {}) {
+  cancelOngoingAiParse();
   selectedAiResumeFile = null;
   const input = document.getElementById('aiResumeFile');
   if (input) input.value = '';
@@ -1778,6 +1791,8 @@ function handleAiFileImport(e) {
     return;
   }
 
+  // 新简历上传时中断上一轮还在进行的解析
+  cancelOngoingAiParse();
   selectedAiResumeFile = file;
 
   // 自动保留源文件（用于网申页面自动上传简历附件）
@@ -1844,6 +1859,8 @@ async function parseResumeText() {
     appLog.info('options', 'parse.click', resumeFile ? `开始解析文件 ${resumeFile.name}` : '开始解析粘贴文本');
   }
 
+  const runId = ++aiParseRunSeq;
+
   try {
     let parsedData;
     let parseResult = null;
@@ -1855,6 +1872,10 @@ async function parseResumeText() {
         fallbackText: resumeText,
         onProgress: (progress) => handleAiParseProgress(progress, btn)
       });
+
+      // 等待期间用户重新上传了简历/切换了资料，本轮结果作废（须在改动任何 UI 前判断）
+      if (runId !== aiParseRunSeq) return;
+
       parsedData = parseResult.data;
 
       if (parseResult.inputMode === 'text') {
@@ -1872,6 +1893,8 @@ async function parseResumeText() {
       }
     } else {
       parsedData = await resumeParser.parseWithAI(resumeText, settings);
+
+      if (runId !== aiParseRunSeq) return;
     }
 
     fillParsedData(parsedData);
@@ -1891,6 +1914,11 @@ async function parseResumeText() {
       if (typeof appLog !== 'undefined') appLog.warn('options', 'parse.save', '解析已写入表单，但保存失败');
     }
   } catch (error) {
+    if (error.message === '解析已取消') {
+      showToast('已取消上一轮解析', 'info');
+      if (typeof appLog !== 'undefined') appLog.info('options', 'parse.cancel', '重新上传/切换资料，已中断上一轮解析');
+      return;
+    }
     console.error('[AI解析] 失败:', error);
     if (typeof appLog !== 'undefined') appLog.error('options', 'parse.fail', '解析失败', error.message);
     if (resumeFile) setAiFileStatus(`解析失败：${error.message}`, 'error');
@@ -1987,16 +2015,6 @@ function fillParsedData(data) {
     document.getElementById('introduction').value = data.introduction;
     currentProfile.introTemplates = currentProfile.introTemplates || { default: '', custom: [] };
     currentProfile.introTemplates.default = data.introduction;
-  }
-
-  // HR 打招呼语 / 简历速览
-  if (data.hrGreeting) {
-    const greetingEl = document.getElementById('hrGreetingText');
-    if (greetingEl) {
-      greetingEl.value = data.hrGreeting;
-      updateGreetingCharCount(data.hrGreeting);
-    }
-    currentProfile.hrGreeting = data.hrGreeting;
   }
 }
 
@@ -2719,7 +2737,6 @@ function initTabNav() {
   const navSaveBtn = document.getElementById('saveBtn');
   const navKanbanActions = document.getElementById('navKanbanActions');
   const sidebarDrawer = document.getElementById('sidebarDrawer');
-  const navPageBadge = document.getElementById('navPageBadge');
 
   function switchTab(tabKey, updateUrl = true) {
     if (!views[tabKey]) tabKey = 'profile';
@@ -2745,13 +2762,11 @@ function initTabNav() {
       if (navSaveBtn) navSaveBtn.style.display = 'inline-flex';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'block';
-      if (navPageBadge) navPageBadge.textContent = '简历资料';
     } else if (tabKey === 'kanban') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
       if (navSaveBtn) navSaveBtn.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'flex';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
-      if (navPageBadge) navPageBadge.textContent = '投递看板';
       requestAnimationFrame(() => {
         updateSubmissionStats();
         renderSubmissionsList();
@@ -2761,7 +2776,6 @@ function initTabNav() {
       if (navSaveBtn) navSaveBtn.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
-      if (navPageBadge) navPageBadge.textContent = '运行日志';
       requestAnimationFrame(() => {
         renderLogList();
       });
@@ -2770,7 +2784,6 @@ function initTabNav() {
       if (navSaveBtn) navSaveBtn.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
-      if (navPageBadge) navPageBadge.textContent = '使用说明';
     }
 
     if (updateUrl) {

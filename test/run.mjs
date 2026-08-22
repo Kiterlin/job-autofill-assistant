@@ -144,7 +144,9 @@ const popupJs = read('popup/popup.js');
 const contentJs = read('scripts/content.js');
 
 const handledActions = new Set([...backgroundJs.matchAll(/case\s+'([^']+)'/g)].map((m) => m[1]));
-handledActions.add('fillForm'); // content script
+handledActions.add('fillForm'); // content script（popup 经 tabs.sendMessage 直达页面）
+handledActions.add('toggleDock'); // 同上，content.js 处理悬浮窗开关
+handledActions.add('aiStepByStepFill'); // 同上，content.js 处理 AI 逐步填充
 const sentActions = new Set();
 for (const js of [optionsJs, popupJs, contentJs]) {
   for (const m of js.matchAll(/action:\s*'([^']+)'/g)) sentActions.add(m[1]);
@@ -229,7 +231,7 @@ try {
   if (parsed.basicInfo.phone !== '13812345678') throw new Error('手机号未清洗: ' + parsed.basicInfo.phone);
   if (parsed.basicInfo.lastName !== '张') throw new Error('中文姓名未拆分');
   if (!parsed.education[0].school.includes('航空')) throw new Error('教育经历丢失');
-  if (parsed.hrGreeting.indexOf('张子涵') < 0) throw new Error('打招呼语丢失');
+  if (parsed.hrGreeting !== undefined) throw new Error('提取结果不应再包含 hrGreeting');
   ok('parseAIResponse 能从混杂文本抽出 JSON 并清洗');
 } catch (e) {
   fail('parseAIResponse', e.message);
@@ -509,6 +511,33 @@ try {
 section('内容脚本与弹窗脚本可加载');
 
 try {
+  const fakeElement = () => ({
+    style: {},
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    innerHTML: '',
+    textContent: '',
+    value: '',
+    appendChild() {},
+    append() {},
+    prepend() {},
+    remove() {},
+    setAttribute() {},
+    getAttribute: () => null,
+    removeAttribute() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() {},
+    querySelector: () => fakeElement(),
+    querySelectorAll: () => [],
+    closest: () => null,
+    contains: () => false,
+    focus() {},
+    blur() {},
+    click() {},
+    insertAdjacentHTML() {},
+    getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 })
+  });
   const fakeDoc = {
     readyState: 'complete',
     body: { appendChild() {} },
@@ -516,14 +545,24 @@ try {
     getElementById: () => null,
     querySelector: () => null,
     querySelectorAll: () => [],
-    createElement: () => ({
-      style: {}, classList: { add() {}, remove() {} },
-      setAttribute() {}, addEventListener() {}, appendChild() {},
-      innerHTML: '', textContent: ''
-    }),
+    createElement: () => fakeElement(),
     addEventListener() {}
   };
-  loadScript('scripts/content.js', { document: fakeDoc, window: { matchMedia: () => ({ matches: false, addEventListener() {} }) } });
+  loadScript('scripts/content.js', {
+    document: fakeDoc,
+    window: {
+      location: { href: 'https://www.example.com/job/detail/123.html', hostname: 'www.example.com' },
+      matchMedia: () => ({ matches: false, addEventListener() {} }),
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {},
+      scrollTo() {},
+      requestAnimationFrame: (fn) => setTimeout(fn, 0),
+      innerWidth: 1280,
+      innerHeight: 800,
+      getComputedStyle: () => ({ getPropertyValue: () => '' })
+    }
+  });
   ok('content.js 可在空页面上下文加载');
 } catch (e) {
   fail('content.js 加载', e.message);
