@@ -586,33 +586,64 @@ class StorageManager {
       const today = new Date().toISOString().slice(0, 10);
       const url = String(submissionData.url || '').trim();
       const company = String(submissionData.company || '未知企业').trim();
-      const position = String(submissionData.position || '网申岗位').trim();
+      let position = String(submissionData.position || '').trim();
+      if (!position || position === '未知岗位') {
+        position = '网申岗位';
+      }
       const profileName = String(submissionData.profileName || '默认资料').trim();
       const profileId = submissionData.profileId || data.activeProfileId || '';
       const status = submissionData.status || '在投';
       const date = submissionData.date || today;
       const notes = submissionData.notes || '';
 
-      // 查重：仅当公司名称与岗位名称完全一致且在同一天时才更新，确保同一公司的不同岗位能够各自独立记录在看板上
+      const isGenericPos = (pos) => !pos || pos === '未知岗位' || pos === '网申岗位';
+
+      // 查重与合并：
+      // 1. 同一天 + 同一公司 + 同一岗位 -> 精确更新
+      // 2. 同一天 + 同一公司 + 相同 URL 或其中一方为泛指岗位 -> 合并并保留具体岗位名称
       const existingIndex = data.submissions.findIndex((s) => {
         const sameCompany = s.company && company && s.company.toLowerCase().trim() === company.toLowerCase().trim();
+        if (!sameCompany || s.date !== date) return false;
+
         const samePosition = s.position && position && s.position.toLowerCase().trim() === position.toLowerCase().trim();
-        return sameCompany && samePosition && s.date === date;
+        if (samePosition) return true;
+
+        const sameUrl = url && s.url && (s.url === url || s.url.split('?')[0] === url.split('?')[0]);
+        if (sameUrl) return true;
+
+        if (isGenericPos(s.position) || isGenericPos(position)) {
+          return true;
+        }
+
+        return false;
       });
 
       if (existingIndex !== -1) {
+        const oldRecord = data.submissions[existingIndex];
+        // 保留高质量的岗位名称，绝不把已有的具体岗位覆盖为泛指岗位
+        let finalPosition = position;
+        if (isGenericPos(position) && !isGenericPos(oldRecord.position)) {
+          finalPosition = oldRecord.position;
+        }
+
+        let finalCompany = company;
+        if ((!company || company === '未知企业') && oldRecord.company && oldRecord.company !== '未知企业') {
+          finalCompany = oldRecord.company;
+        }
+
         data.submissions[existingIndex] = {
-          ...data.submissions[existingIndex],
-          company,
-          position,
-          url: url || data.submissions[existingIndex].url,
-          profileName,
-          profileId,
-          status: data.submissions[existingIndex].status || status,
+          ...oldRecord,
+          company: finalCompany,
+          position: finalPosition,
+          url: url || oldRecord.url,
+          profileName: profileName !== '默认资料' ? profileName : (oldRecord.profileName || profileName),
+          profileId: profileId || oldRecord.profileId,
+          status: oldRecord.status || status,
+          notes: notes || oldRecord.notes || '',
           updatedAt: new Date().toISOString()
         };
         await this.saveAll(data);
-        console.log('[存储] 更新同公司同岗位投递记录:', company, position);
+        console.log('[存储] 更新投递记录 (保留具体岗位):', finalCompany, finalPosition);
         return data.submissions[existingIndex];
       }
 

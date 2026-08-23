@@ -1055,7 +1055,7 @@
     // 1. 优先检查当前是否处于 HR 聊天/沟通框界面
     const chatInput = findChatInputElement();
     if (chatInput) {
-      const posName = detectPositionName() || profile.jobIntention?.expectedPosition || '应聘岗位';
+      const posName = detectPositionName(profile) || profile?.jobIntention?.expectedPosition || '应聘岗位';
       const compName = detectCompanyName() || '';
       const greeting = profile.skills?.intro || generateDefaultGreeting(profile, posName, compName);
 
@@ -1476,9 +1476,9 @@
     return { filledCount, results };
   }
 
-  const JOB_TITLE_HINT = /工程师|开发|算法|产品|运营|设计|测试|管培|专员|经理|助理|分析师|研究员|架构师|实习|前端|后端|全栈|数据|策划|美术|原画|安全|运维|大模型|\bAI\b|游戏|客户端|服务端|量化|策略|增长|投放|审核|编辑|翻译|法务|财务|人力|HR|招聘/;
+  const JOB_TITLE_HINT = /工程师|开发|算法|产品|运营|设计|测试|管培|专员|经理|助理|分析师|研究员|架构师|实习|前端|后端|全栈|数据|策划|美术|原画|安全|运维|大模型|\bAI\b|游戏|客户端|服务端|量化|策略|增长|投放|审核|编辑|翻译|法务|财务|人力|HR|研发|技术|软件|硬件|嵌入式|芯片|通信|网络|自动化|机械|电气|材料|工艺|销售|商务|BD|市场|公关|客服|风控|会计|审计|采购|物流|供应链|行政|文员|顾问|教研|教师|导师|主管|总监|负责人|Leader|应届生|储备干部|管培生/;
   const JUNK_COMPANY_RE = /^(校园招聘|校招|社招|社会招聘|招聘官网|招聘|官方网站|网申系统|应届生招聘|招聘首页|登录|注册|首页|职位详情|网申|投递记录|人才招聘|mokahr|beisen|dayee|51job|zhaopin|liepin|nowcoder|boss直聘|申请职位|职位申请)$/i;
-  const JUNK_POSITION_RE = /^(工作职责|岗位职责|任职要求|任职资格|岗位要求|职位描述|职位详情|投递信息|基本信息|个人信息|教育背景|工作经历|项目经历|荣誉奖励|附件简历|求职意向|账号设置|个人中心|申请表单|申请信息|填写信息|校园招聘|校招|社会招聘|登录|注册|首页|网申|校招首页)$/i;
+  const JUNK_POSITION_RE = /^(工作职责|岗位职责|任职要求|任职资格|岗位要求|职位描述|职位详情|投递信息|基本信息|个人信息|教育背景|工作经历|项目经历|荣誉奖励|附件简历|求职意向|账号设置|个人中心|申请表单|申请信息|填写信息|校园招聘|校招|社会招聘|登录|注册|首页|网申|校招首页|工作地点|工作城市|工作性质|工作经验|所属部门|所属业务线|职位类别|职位类型|职位方向|招聘人数|发布时间|更新时间|薪资待遇|薪酬范围|学历要求|招聘对象|投递岗位|申请职位|应聘职位|应聘岗位|目标职位|选择职位|立即申请|立即投递|投递简历|投递表单|简历预览|简历填写|查看更多|返回列表|暂无职位|暂无数据|职位列表|全部职位|搜索职位|招聘动态|招聘公告|关于我们|加入我们|人才招聘|招聘系统|海外招聘|内推专区|职位名称|岗位名称)$/i;
   const KNOWN_COMPANIES = [
     { match: /37\.com|37wan|\/37\/|37interactive|三七/i, name: '三七互娱' },
     { match: /tencent|\/tencent\//i, name: '腾讯' },
@@ -1521,9 +1521,20 @@
     return (m && m[1]) || '';
   }
 
+  function cleanPositionName(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/<[^>]+>/g, '')
+      .replace(/【.*?】|\[.*?\]|（.*?届.*?）|\(.*?\d{4}.*?\)/g, ' ')
+      .replace(/^(?:应聘职位|申请岗位|投递职位|应聘岗位|目标职位|申请职位|职位名称|岗位名称|招聘岗位|招聘职位)[：:\s]+/g, '')
+      .replace(/^[\s·\-_|:：、/]+|[\s·\-_|:：、/]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function looksLikePosition(text) {
-    const t = String(text || '').replace(/【.*?】|\[.*?\]/g, '').replace(/^[\s·\-_|:：]+|[\s·\-_|:：]+$/g, '').trim();
-    if (t.length < 2 || t.length > 40) return false;
+    const t = cleanPositionName(text);
+    if (t.length < 2 || t.length > 50) return false;
     if (JUNK_POSITION_RE.test(t)) return false;
     if (JUNK_COMPANY_RE.test(t)) return false;
     if (KNOWN_COMPANIES.some((c) => c.name === t)) return false;
@@ -1549,11 +1560,89 @@
     return null;
   }
 
+  function readPositionFromUrl() {
+    try {
+      const search = new URLSearchParams(window.location.search);
+      const hashStr = window.location.hash ? window.location.hash.split('?')[1] : '';
+      const hashParams = hashStr ? new URLSearchParams(hashStr) : null;
+
+      const keys = ['jobName', 'positionName', 'jobTitle', 'position', 'postName', 'recruitPostName', 'job_name', 'job_title', 'pos_name', 'post_name', 'title'];
+      for (const k of keys) {
+        let val = search.get(k) || (hashParams && hashParams.get(k));
+        if (val) {
+          try { val = decodeURIComponent(val); } catch {}
+          val = cleanPositionName(val);
+          if (looksLikePosition(val) && (JOB_TITLE_HINT.test(val) || val.length <= 24)) {
+            return val;
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  function readPositionFromFormInputs() {
+    try {
+      const inputs = document.querySelectorAll('input[name*="position" i], input[name*="job" i], input[name*="post" i], input[id*="position" i], input[id*="job" i], input[id*="post" i], [class*="apply-position"] input, [class*="applyPosition"] input');
+      for (const inp of inputs) {
+        if (inp.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
+        const val = cleanPositionName(inp.value || inp.getAttribute('value') || inp.placeholder);
+        if (looksLikePosition(val) && (JOB_TITLE_HINT.test(val) || val.length <= 24)) {
+          return val;
+        }
+      }
+
+      const labels = document.querySelectorAll('label, .ant-form-item-label, .el-form-item__label, [class*="form-label"], [class*="item-label"]');
+      for (const lbl of labels) {
+        if (lbl.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
+        const txt = lbl.textContent.trim();
+        if (/应聘职位|申请岗位|投递职位|应聘岗位|目标职位|申请职位|职位名称|岗位名称/.test(txt)) {
+          const item = lbl.closest('.ant-form-item, .el-form-item, .form-item, .form-group, [class*="formItem"], tr, div');
+          if (item) {
+            const valEl = item.querySelector('input, select, .ant-form-item-control, .el-form-item__content, [class*="value"], [class*="content"]');
+            if (valEl) {
+              const val = cleanPositionName(valEl.value || valEl.textContent);
+              if (looksLikePosition(val) && !/职位名称|岗位名称/.test(val)) {
+                return val;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  function readPositionFromBreadcrumbs() {
+    try {
+      const crumbContainers = document.querySelectorAll('.breadcrumb, .breadcrumbs, .ant-breadcrumb, .el-breadcrumb, .arco-breadcrumb, .semi-breadcrumb, [class*="breadcrumb" i], [class*="Breadcrumb"]');
+      for (const container of crumbContainers) {
+        if (container.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
+        const items = container.querySelectorAll('li, a, span, [class*="item"]');
+        if (items.length > 1) {
+          for (let i = items.length - 1; i >= 0; i--) {
+            const text = cleanPositionName(items[i].textContent);
+            if (looksLikePosition(text) && (JOB_TITLE_HINT.test(text) || text.length <= 24)) {
+              return text;
+            }
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   function saveJobMeta(meta) {
     try {
-      if (!meta || (!meta.company && !meta.position)) return;
+      if (!meta) return;
+      const prev = loadJobMeta() || {};
+      const newPos = (meta.position && looksLikePosition(meta.position)) ? cleanPositionName(meta.position) : (prev.position || '');
+      const newComp = (meta.company && meta.company !== '未知企业') ? meta.company.trim() : (prev.company || '未知企业');
+      if (!newPos && (!newComp || newComp === '未知企业')) return;
+
       const jobId = currentJobId() || location.pathname;
-      sessionStorage.setItem('capybaraJobMeta', JSON.stringify({ ...meta, jobId, savedAt: Date.now() }));
+      const merged = { company: newComp, position: newPos, jobId, savedAt: Date.now() };
+      sessionStorage.setItem('capybaraJobMeta', JSON.stringify(merged));
     } catch {}
   }
 
@@ -1562,9 +1651,7 @@
       const raw = sessionStorage.getItem('capybaraJobMeta');
       if (!raw) return null;
       const meta = JSON.parse(raw);
-      const jobId = currentJobId();
-      if (jobId && meta.jobId && meta.jobId !== jobId) return null;
-      return meta;
+      return meta && (meta.position || meta.company) ? meta : null;
     } catch {
       return null;
     }
@@ -1611,98 +1698,78 @@
 
   function detectPositionName(profile) {
     const jsonld = readJsonLdJob();
-    if (jsonld && looksLikePosition(jsonld.position) && JOB_TITLE_HINT.test(jsonld.position)) {
-      return jsonld.position.trim();
+    if (jsonld && looksLikePosition(jsonld.position)) {
+      return cleanPositionName(jsonld.position);
     }
+
+    const urlPos = readPositionFromUrl();
+    if (urlPos) return urlPos;
+
+    const formPos = readPositionFromFormInputs();
+    if (formPos) return formPos;
 
     const selectors = [
       '.job-name', '.job-title', '.position-name', '.position-title',
       '[class*="jobName"]', '[class*="jobTitle"]', '[class*="positionTitle"]',
+      '[class*="job-name"]', '[class*="job-title"]', '[class*="position-name"]', '[class*="position-title"]',
+      '[class*="postName"]', '[class*="post-name"]', '[class*="postTitle"]',
       '.job-detail-header h1', '.job-banner h1', 'h1.job-title', '.job-header-title',
-      '[class*="apply-job"] h1', '[class*="job-info"] h1', '[class*="job-info"] h2'
+      '[class*="apply-job"] h1', '[class*="job-info"] h1', '[class*="job-info"] h2',
+      '.pos-name', '.post-title', '#lblJobTitle', '.detail-title', '[class*="detailTitle"]',
+      '[class*="JobDetail_title"]', '[class*="JobHeader"] h1', '[class*="headerTitle"]',
+      '[data-automation-id="jobPostingHeader"]'
     ];
     for (const sel of selectors) {
       for (const el of document.querySelectorAll(sel)) {
         if (el.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
-        const text = el.textContent.replace(/\s+/g, ' ').trim();
+        const text = cleanPositionName(el.textContent);
         if (looksLikePosition(text) && (JOB_TITLE_HINT.test(text) || text.length <= 24)) {
-          return text.replace(/【.*?】|\[.*?\]/g, '').trim();
+          return text;
         }
       }
     }
 
+    const crumbPos = readPositionFromBreadcrumbs();
+    if (crumbPos) return crumbPos;
+
     const headings = document.querySelectorAll('h1, h2, h3');
     for (const el of headings) {
       if (el.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
-      const text = el.textContent.replace(/\s+/g, ' ').trim();
+      const text = cleanPositionName(el.textContent);
       if (looksLikePosition(text) && JOB_TITLE_HINT.test(text)) {
-        return text.replace(/【.*?】|\[.*?\]/g, '').trim();
+        return text;
       }
     }
 
-    const labeled = (document.body.innerText || '').match(/(?:应聘职位|申请岗位|投递职位|应聘岗位|目标职位|申请职位)[：:\s]+([^\n\r]{2,40})/);
+    const labeled = (document.body.innerText || '').match(/(?:应聘职位|申请岗位|投递职位|应聘岗位|目标职位|申请职位|职位名称|岗位名称)[：:\s]+([^\n\r]{2,40})/);
     if (labeled) {
-      const found = labeled[1].split(/[，,。；;（(]/)[0].trim();
+      const found = cleanPositionName(labeled[1].split(/[，,。；;（(]/)[0]);
       if (looksLikePosition(found) && !/职位名称|岗位名称/.test(found)) return found;
     }
 
-    const titleParts = (document.title || '').split(/[-_|—–\/]/).map((s) => s.replace(/【.*?】|\[.*?\]/g, '').trim()).filter(Boolean);
+    const titleParts = (document.title || '')
+      .split(/[-_|—–\t]|\s+\/\s+/)
+      .map(cleanPositionName)
+      .filter(Boolean);
     for (const part of titleParts) {
       if (looksLikePosition(part) && JOB_TITLE_HINT.test(part)) return part;
     }
 
     const cached = loadJobMeta();
     if (cached && looksLikePosition(cached.position) && !JUNK_POSITION_RE.test(cached.position)) {
-      return cached.position;
+      return cleanPositionName(cached.position);
     }
 
-    if (jsonld && looksLikePosition(jsonld.position)) return jsonld.position.trim();
-    if (profile && looksLikePosition(profile.jobIntention?.expectedPosition) && JOB_TITLE_HINT.test(profile.jobIntention.expectedPosition)) {
-      return profile.jobIntention.expectedPosition;
+    const prof = profile || currentActiveProfile;
+    if (prof?.jobIntention?.expectedPosition && looksLikePosition(prof.jobIntention.expectedPosition)) {
+      return cleanPositionName(prof.jobIntention.expectedPosition);
     }
-    return '未知岗位';
+
+    return '网申岗位';
   }
 
   function cacheJobMetaFromPage() {
-    const position = (() => {
-      const jsonld = readJsonLdJob();
-      if (jsonld && looksLikePosition(jsonld.position) && JOB_TITLE_HINT.test(jsonld.position)) {
-        return jsonld.position.trim();
-      }
-
-      const selectors = [
-        '.job-name', '.job-title', '.position-name', '.position-title',
-        '[class*="jobName"]', '[class*="jobTitle"]', '[class*="positionTitle"]',
-        '.job-detail-header h1', '.job-banner h1', 'h1.job-title', '.job-header-title',
-        '[class*="apply-job"] h1', '[class*="job-info"] h1', '[class*="job-info"] h2'
-      ];
-
-      for (const sel of selectors) {
-        for (const el of document.querySelectorAll(sel)) {
-          if (el.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
-          const text = el.textContent.replace(/\s+/g, ' ').trim();
-          if (looksLikePosition(text) && (JOB_TITLE_HINT.test(text) || text.length <= 24)) {
-            return text.replace(/【.*?】|\[.*?\]/g, '').trim();
-          }
-        }
-      }
-
-      const headings = document.querySelectorAll('h1, h2, h3');
-      for (const el of headings) {
-        if (el.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) continue;
-        const text = el.textContent.replace(/\s+/g, ' ').trim();
-        if (looksLikePosition(text) && JOB_TITLE_HINT.test(text)) {
-          return text.replace(/【.*?】|\[.*?\]/g, '').trim();
-        }
-      }
-
-      const titleParts = (document.title || '').split(/[-_|—–\/]/).map((s) => s.replace(/【.*?】|\[.*?\]/g, '').trim()).filter(Boolean);
-      for (const part of titleParts) {
-        if (looksLikePosition(part) && JOB_TITLE_HINT.test(part)) return part;
-      }
-
-      return '';
-    })();
+    const position = detectPositionName();
     const company = detectCompanyName();
 
     if (typeof appLog !== 'undefined') {
@@ -1713,7 +1780,7 @@
       });
     }
 
-    if ((position && position !== '未知岗位') || (company && company !== '未知企业')) {
+    if ((position && position !== '未知岗位' && position !== '网申岗位') || (company && company !== '未知企业')) {
       saveJobMeta({ company, position });
     }
   }
@@ -3148,7 +3215,7 @@
     initPanelDragging(panel);
 
     const posEl = panel.querySelector('#job-autofill-detected-pos');
-    const detectedPos = detectPositionName() || '网申职位';
+    const detectedPos = detectPositionName(currentActiveProfile) || '网申职位';
     if (posEl) posEl.textContent = detectedPos;
 
     panel.querySelector('#job-autofill-ai-close').addEventListener('click', () => {
@@ -3160,7 +3227,7 @@
       btn.addEventListener('click', () => {
         const type = btn.getAttribute('data-type');
         const input = panel.querySelector('#job-autofill-ai-prompt');
-        const pos = detectPositionName() || '应聘岗位';
+        const pos = detectPositionName(currentActiveProfile) || '应聘岗位';
         if (type === 'greeting') {
           input.value = `请为我生成一段 100~150 字得体、自信、高情商的应聘打招呼语，应聘岗位为「${pos}」，结合我的专业和实习经历。`;
         } else if (type === 'why_us') {
