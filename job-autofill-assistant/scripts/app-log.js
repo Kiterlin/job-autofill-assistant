@@ -36,6 +36,22 @@ function appLogInServiceWorker() {
   return typeof importScripts === 'function' && typeof window === 'undefined';
 }
 
+function appLogStorageArea() {
+  try {
+    return globalThis.chrome?.storage?.local || null;
+  } catch {
+    return null;
+  }
+}
+
+function appLogRuntimeApi() {
+  try {
+    return globalThis.chrome?.runtime || null;
+  } catch {
+    return null;
+  }
+}
+
 const appLogState = {
   queue: [],
   timer: null,
@@ -47,23 +63,30 @@ function appLogFlush() {
   const batch = appLogState.queue.splice(0, appLogState.queue.length);
   if (!batch.length) return;
 
+  const storage = appLogStorageArea();
+  const runtime = appLogRuntimeApi();
+  if (!storage && !runtime?.sendMessage) return;
+
   const write = (existing) => {
+    if (!storage) return;
     const merged = (Array.isArray(existing) ? existing : []).concat(batch);
     const trimmed = merged.length > APP_LOG_MAX ? merged.slice(merged.length - APP_LOG_MAX) : merged;
-    chrome.storage.local.set({ [APP_LOG_KEY]: trimmed });
+    try { storage.set({ [APP_LOG_KEY]: trimmed }); } catch {}
   };
 
-  if (appLogInServiceWorker() || !chrome.runtime?.sendMessage) {
-    chrome.storage.local.get(APP_LOG_KEY, (res) => write(res && res[APP_LOG_KEY]));
+  if (appLogInServiceWorker() || !runtime?.sendMessage) {
+    if (!storage) return;
+    try { storage.get(APP_LOG_KEY, (res) => write(res && res[APP_LOG_KEY])); } catch {}
     return;
   }
 
   try {
-    chrome.runtime.sendMessage({ action: 'appendLogs', entries: batch }, () => {
-      void chrome.runtime.lastError;
+    runtime.sendMessage({ action: 'appendLogs', entries: batch }, () => {
+      try { void runtime.lastError; } catch {}
     });
   } catch {
-    chrome.storage.local.get(APP_LOG_KEY, (res) => write(res && res[APP_LOG_KEY]));
+    if (!storage) return;
+    try { storage.get(APP_LOG_KEY, (res) => write(res && res[APP_LOG_KEY])); } catch {}
   }
 }
 
@@ -139,15 +162,23 @@ const appLog = {
 
   async list() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(APP_LOG_KEY, (res) => {
-        resolve(Array.isArray(res && res[APP_LOG_KEY]) ? res[APP_LOG_KEY] : []);
-      });
+      const storage = appLogStorageArea();
+      if (!storage) return resolve([]);
+      try {
+        storage.get(APP_LOG_KEY, (res) => {
+          resolve(Array.isArray(res && res[APP_LOG_KEY]) ? res[APP_LOG_KEY] : []);
+        });
+      } catch {
+        resolve([]);
+      }
     });
   },
 
   async clear() {
     return new Promise((resolve) => {
-      chrome.storage.local.set({ [APP_LOG_KEY]: [] }, () => resolve());
+      const storage = appLogStorageArea();
+      if (!storage) return resolve();
+      try { storage.set({ [APP_LOG_KEY]: [] }, () => resolve()); } catch { resolve(); }
     });
   }
 };
@@ -155,11 +186,17 @@ const appLog = {
 async function persistLogEntries(entries) {
   const batch = Array.isArray(entries) ? entries : [entries];
   return new Promise((resolve) => {
-    chrome.storage.local.get(APP_LOG_KEY, (res) => {
-      const existing = Array.isArray(res && res[APP_LOG_KEY]) ? res[APP_LOG_KEY] : [];
-      const merged = existing.concat(batch);
-      const trimmed = merged.length > APP_LOG_MAX ? merged.slice(merged.length - APP_LOG_MAX) : merged;
-      chrome.storage.local.set({ [APP_LOG_KEY]: trimmed }, () => resolve(true));
-    });
+    const storage = appLogStorageArea();
+    if (!storage) return resolve(false);
+    try {
+      storage.get(APP_LOG_KEY, (res) => {
+        const existing = Array.isArray(res && res[APP_LOG_KEY]) ? res[APP_LOG_KEY] : [];
+        const merged = existing.concat(batch);
+        const trimmed = merged.length > APP_LOG_MAX ? merged.slice(merged.length - APP_LOG_MAX) : merged;
+        try { storage.set({ [APP_LOG_KEY]: trimmed }, () => resolve(true)); } catch { resolve(false); }
+      });
+    } catch {
+      resolve(false);
+    }
   });
 }
