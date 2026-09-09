@@ -14,9 +14,9 @@ Chrome 扩展：识别并自动填充校招 / 社招网申表单。资料存在�
 
 ![资料配置页](pictures/options-profile.png)
 
-在招聘页点悬浮窗「填充」，按标签识别并写入表单：
+弹窗、配置页、看板都是扩展自己的界面。下面这张填充效果拍的是仓库里的**示例表单**（`test/fixtures/demo-apply-form.html`），不是某家公司的真实招聘站：
 
-![网申页一键填充](pictures/fill-demo.png)
+![示例表单上的一键填充](pictures/fill-demo.png)
 
 填充时会记下公司 / 岗位，投递看板里改进度、导出 CSV：
 
