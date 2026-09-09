@@ -47,7 +47,8 @@
 
   function matchSelectOption(select, value) {
     const valStr = String(value).trim();
-    const opts = Array.from(select.options);
+    if (!valStr) return null;
+    const opts = Array.from(select.options).filter((opt) => !opt.disabled && !opt.parentElement?.disabled);
     let matched = opts.find((opt) =>
       opt.value === valStr ||
       opt.text.trim() === valStr ||
@@ -56,13 +57,15 @@
     );
     if (!matched && /^\d+$/.test(valStr)) {
       const num = parseInt(valStr, 10);
-      matched = opts.find((opt) => parseInt(opt.value, 10) === num || parseInt(opt.text, 10) === num);
+      matched = opts.find((opt) => [opt.value, opt.text.trim()].some((text) =>
+        /^\d+[年月日]?$/.test(text) && parseInt(text, 10) === num));
     }
     if (!matched) {
-      matched = opts.find((opt) => {
+      const candidates = opts.filter((opt) => {
         const t = opt.text.trim();
-        return t === `${valStr}月` || t === `${valStr}年` || t.includes(valStr);
+        return t === `${valStr}月` || t === `${valStr}年` || (valStr.length > 1 && t.includes(valStr));
       });
+      if (candidates.length === 1) matched = candidates[0];
     }
     return matched;
   }
@@ -95,11 +98,9 @@
         element.selectedIndex = matchedOpt.index;
         matchedOpt.selected = true;
         nativeSet(element, HTMLSelectElement.prototype, matchedOpt.value);
-      } else {
-        nativeSet(element, HTMLSelectElement.prototype, valStr);
-      }
-      dispatchInputEvents(element, valStr);
-      return true;
+      } else return false;
+      dispatchInputEvents(element, matchedOpt.value);
+      return element.value === matchedOpt.value;
     }
 
     const proto = tagName === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -114,7 +115,7 @@
       nativeSet(element, proto, valStr);
     }
     dispatchInputEvents(element, valStr);
-    return element.value === valStr || element.value.length > 0;
+    return element.value === valStr;
   }
 
   function optionTextEquals(text, value) {
@@ -122,7 +123,7 @@
     const v = String(value || '').replace(/\s+/g, '').trim();
     if (!t || !v) return false;
     if (t === v || t === `${v}年` || t === `${v}月` || t === `${v}日`) return true;
-    if (/^\d+$/.test(v) && parseInt(t, 10) === parseInt(v, 10)) return true;
+    if (/^\d+$/.test(v) && /^\d+[年月日]?$/.test(t) && parseInt(t, 10) === parseInt(v, 10)) return true;
     return false;
   }
 
@@ -135,12 +136,25 @@
     return !!wrap;
   }
 
-  function visibleDropdownRoot() {
+  function visibleDropdownRoot(el) {
+    const ids = `${el.getAttribute('aria-controls') || ''} ${el.getAttribute('aria-owns') || ''}`.trim().split(/\s+/);
+    for (const id of ids) {
+      const owned = document.getElementById(id);
+      if (owned && isElementTrulyVisible(owned)) return owned;
+    }
     const nodes = document.querySelectorAll(
-      '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .el-select-dropdown, .rc-select-dropdown, [role="listbox"]'
+      '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .el-select-dropdown, .rc-select-dropdown, .semi-select-option-list, .arco-select-popup, [role="listbox"]'
     );
-    const visible = [...nodes].filter((d) => d.getClientRects().length > 0);
-    return visible[visible.length - 1] || null;
+    const visible = [...nodes].filter((d) => isElementTrulyVisible(d));
+    return visible.length === 1 ? visible[0] : null;
+  }
+
+  function dropdownOptions(el) {
+    const root = visibleDropdownRoot(el);
+    if (!root) return [];
+    return [...root.querySelectorAll('[role="option"], .ant-select-item-option, .el-select-dropdown__item, .semi-select-option, .arco-select-option')]
+      .filter((option) => isElementTrulyVisible(option) && option.getAttribute('aria-disabled') !== 'true' &&
+        !option.matches('.is-disabled, [disabled], [class*="option-disabled"]'));
   }
 
   async function fillSelectWidget(el, value) {
@@ -155,8 +169,7 @@
     trigger.click();
     await sleep(180);
 
-    const root = visibleDropdownRoot() || document;
-    const opts = [...root.querySelectorAll('[role="option"], .ant-select-item-option, .el-select-dropdown__item, li')];
+    const opts = dropdownOptions(el);
     const hit = opts.find((o) => optionTextEquals(o.textContent, valStr));
     if (hit) {
       hit.click();
@@ -165,12 +178,13 @@
     }
 
     const search = wrap.querySelector('input') || (el.tagName === 'INPUT' ? el : null);
-    if (search) {
+    if (search && !search.readOnly && !search.disabled) {
       setValue(search, valStr);
       await sleep(180);
-      const root2 = visibleDropdownRoot() || document;
-      const opts2 = [...root2.querySelectorAll('[role="option"], .ant-select-item-option, .el-select-dropdown__item, li')];
-      const hit2 = opts2.find((o) => optionTextEquals(o.textContent, valStr) || String(o.textContent || '').includes(valStr));
+      const opts2 = dropdownOptions(el);
+      const exact = opts2.find((o) => optionTextEquals(o.textContent, valStr));
+      const partial = valStr.length > 1 ? opts2.filter((o) => String(o.textContent || '').includes(valStr)) : [];
+      const hit2 = exact || (partial.length === 1 ? partial[0] : null);
       if (hit2) {
         hit2.click();
         await sleep(60);
@@ -209,17 +223,15 @@
     }
     const name = el.name;
     const group = name
-      ? [...document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`)]
+      ? [...(el.form || el.getRootNode()).querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`)].filter((r) => r.form === el.form && !r.disabled)
       : [el];
     const hit = group.find((r) => {
       const cap = choiceCaption(r);
-      return cap === val || cap.includes(val) || val.includes(cap) || String(r.value) === val;
+      return (cap && (cap === val || cap.includes(val) || val.includes(cap))) || String(r.value) === val;
     });
     if (!hit) return false;
-    hit.checked = true;
     hit.click();
-    dispatchInputEvents(hit, val);
-    return true;
+    return hit.checked;
   }
 
   function writableBox(el) {
@@ -243,15 +255,11 @@
     const target = writableBox(el) || el;
     if (target.type === 'radio' || target.type === 'checkbox') return fillChoice(target, value);
 
-    const tag = target.tagName.toLowerCase();
     const valueToFill = valueWithinFieldLimit(target, value);
-    const longText = valueToFill.length > 24;
-    const isTextBox = tag === 'textarea' || target.isContentEditable || (tag === 'input' && !isSelectWidget(target));
-    if (isTextBox || longText) return setValue(target, valueToFill);
-
     if (isSelectWidget(target) || isYearControl(target) || isMonthControl(target)) {
       return fillSelectWidget(target, valueToFill);
     }
+    if (target.readOnly || target.disabled) return false;
     return setValue(target, valueToFill);
   }
 
@@ -267,6 +275,10 @@
 
   function getClosestLabelText(input) {
     try {
+      const labelledBy = (input.getAttribute('aria-labelledby') || '').split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent || '').join(' ');
+      const accessibleLabel = cleanLabel(labelledBy) || cleanLabel(input.getAttribute('aria-label'));
+      if (accessibleLabel) return accessibleLabel;
       if (input.id) {
         const label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
         const cleaned = cleanLabel(label && label.textContent);
@@ -293,10 +305,11 @@
         if (firstText && first !== input && !first.contains(input)) return firstText;
       }
 
-      let node = input.parentElement;
+      let node = input;
       for (let i = 0; i < 4 && node; i++) {
         const prev = node.previousElementSibling;
-        const cleaned = cleanLabel(prev && prev.textContent);
+        const cleaned = prev && !prev.matches('input, textarea, select, [role="combobox"]') &&
+          !prev.querySelector('input, textarea, select, [role="combobox"]') && cleanLabel(prev.textContent);
         if (cleaned) return cleaned;
         node = node.parentElement;
       }
@@ -342,7 +355,7 @@
     ],
     lastName: [
       /^(last[-_\s]?name|surname|family[-_\s]?name|姓|lastname)$/i,
-      /last|surname|family|姓氏/i
+      /last[-_\s]?name|surname|family[-_\s]?name|姓氏/i
     ],
     middleName: [
       /^(middle[-_\s]?name|middlename)$/i,
@@ -438,6 +451,14 @@
       /^(graduation|grad.*date|毕业时间|毕业年月|预计毕业)$/i,
       /毕业时间|毕业年月|预计毕业/i
     ],
+    maritalStatus: [
+      /^(marital|marriage|marital.*status|婚姻状况|婚姻|婚否)$/i,
+      /婚姻状况|婚姻情况|marital/i
+    ],
+    currentCity: [
+      /^(current.*city|present.*city|residence.*city|现居住地|现居城市|目前所在地|现所在城市|居住城市)$/i,
+      /现居住地|现居城市|目前所在城市|现所在地/i
+    ],
 
     // 紧急联系人
     emergencyContact: [
@@ -474,6 +495,14 @@
       /^(referral.*code|recommender|内推码|推荐码|推荐人|伯乐码)$/i,
       /内推码|推荐码|推荐人|伯乐码/i
     ],
+    recruitSource: [
+      /^(recruit.*source|source.*recruit|channel|信息来源|招聘渠道|获取渠道|获知渠道|渠道来源)$/i,
+      /招聘渠道|信息来源|获知渠道|渠道来源/i
+    ],
+    willingToTravel: [
+      /^(willing.*travel|travel|出差|驻外|接受出差|愿意出差|能否出差|可出差)$/i,
+      /出差|驻外|接受.*异地/i
+    ],
 
     // 语言能力
     cet4: [
@@ -492,11 +521,55 @@
       /^(toefl|托福|托福成绩)$/i,
       /toefl|托福/i
     ],
+    otherLanguages: [
+      /^(other.*languages?|第二外语|其他外语|小语种|外语能力)$/i,
+      /其他外语|第二外语|小语种|other.*language/i
+    ],
 
     // 荣誉奖项
     awards: [
       /^(awards|honors|荣誉|奖项|获奖经历|竞赛获奖)$/i,
       /荣誉|奖项|获奖经历|竞赛/i
+    ],
+    certificates: [
+      /^(certificates?|licenses?|资格证书|职业证书|证书名称|所获证书)$/i,
+      /资格证书|职业证书|所获证书|certificate/i
+    ],
+    certificateCode: [
+      /^(certificate.*(?:code|number|no)|证书编号|资格证编号)$/i,
+      /证书.*编号|certificate.*(?:code|number)/i
+    ],
+    certificateIssuer: [
+      /^(certificate.*issuer|issuing.*organization|颁发机构|发证机构)$/i,
+      /颁发机构|发证机构|certificate.*issuer/i
+    ],
+    certificateDate: [
+      /^(certificate.*date|issue.*date|取得日期|获证日期|发证日期)$/i,
+      /证书.*日期|取得日期|发证日期/i
+    ],
+    certificateExpiryDate: [
+      /^(certificate.*expir|expiry.*date|有效期至|证书有效期)$/i,
+      /有效期至|证书.*有效期|certificate.*expir/i
+    ],
+    familyName: [
+      /^(family.*name|member.*name|家庭成员姓名|家属姓名)$/i,
+      /家庭成员.*姓名|家属姓名/i
+    ],
+    familyRelation: [
+      /^(family.*relation|member.*relation|亲属关系|家庭成员关系)$/i,
+      /亲属关系|家庭成员.*关系/i
+    ],
+    familyEmployer: [
+      /^(family.*employer|member.*company|亲属工作单位|家庭成员工作单位)$/i,
+      /亲属.*工作单位|家庭成员.*单位/i
+    ],
+    familyPosition: [
+      /^(family.*position|member.*position|亲属职务|家庭成员职务)$/i,
+      /亲属.*职务|家庭成员.*职务/i
+    ],
+    familyPhone: [
+      /^(family.*phone|member.*phone|亲属联系电话|家庭成员电话)$/i,
+      /亲属.*电话|家庭成员.*电话/i
     ],
 
     // 教育信息
@@ -519,6 +592,10 @@
     degreeType: [
       /^(degree.*type|study.*type|培养方式|学习形式|学历类型|统招)$/i,
       /培养方式|学历类型|全日制/i
+    ],
+    schoolType: [
+      /^(school.*type|college.*type|院校层次|学校类型|院校类别|学校层次)$/i,
+      /院校层次|学校类型|院校类别|学校层次/i
     ],
     gpa: [
       /^(gpa|grade|score|绩点|成绩|平均分|平均绩点)$/i,
@@ -894,6 +971,8 @@
     ['ethnicity', ['民族']],
     ['hometown', ['户口所在地', '户籍所在地', '生源地', '籍贯', '户籍']],
     ['graduationDate', ['预计毕业时间', '毕业时间', '毕业年月', '毕业年份']],
+    ['maritalStatus', ['婚姻状况', '婚姻情况', '婚否', 'maritalstatus']],
+    ['currentCity', ['现居住城市', '现居住地', '目前所在地', '现所在地', '现居地']],
     ['emergencyContact', ['紧急联系人姓名', '紧急联络人', '紧急联系人']],
     ['emergencyRelation', ['与本人关系', '紧急联系人关系', '联系人关系']],
     ['emergencyPhone', ['紧急联系人电话', '紧急联系人手机', '紧急联系电话']],
@@ -902,16 +981,30 @@
     ['expectedSalary', ['期望薪资', '期望月薪', '薪资要求', '期望年薪']],
     ['availableDate', ['最快到岗', '到岗时间', '可入职时间']],
     ['referralCode', ['内推码', '推荐码', '推荐人', '伯乐码', '内推人']],
+    ['recruitSource', ['招聘渠道', '信息来源', '获知渠道', '渠道来源']],
+    ['willingToTravel', ['是否愿意出差', '是否接受出差', '出差意愿', '驻外意愿']],
     ['cet4', ['英语四级', '四级成绩', '四级', 'cet4']],
     ['cet6', ['英语六级', '六级成绩', '六级', 'cet6']],
     ['ielts', ['雅思成绩', '雅思', 'ielts']],
     ['toefl', ['托福成绩', '托福', 'toefl']],
+    ['otherLanguages', ['其他外语', '第二外语', '小语种', '外语能力']],
     ['awards', ['获奖经历', '竞赛获奖', '荣誉奖项', '奖项', '荣誉']],
+    ['certificates', ['资格证书', '职业证书', '证书名称', '所获证书']],
+    ['certificateCode', ['证书编号', '资格证编号']],
+    ['certificateIssuer', ['颁发机构', '发证机构']],
+    ['certificateDate', ['取得日期', '获证日期', '发证日期']],
+    ['certificateExpiryDate', ['有效期至', '证书有效期']],
+    ['familyName', ['家庭成员姓名', '家属姓名', '亲属姓名', '成员姓名', '父亲姓名', '母亲姓名', '配偶姓名']],
+    ['familyRelation', ['亲属关系', '家庭成员关系', '与家庭成员关系']],
+    ['familyEmployer', ['家庭成员工作单位', '亲属工作单位', '家属工作单位']],
+    ['familyPosition', ['家庭成员职务', '亲属职务', '家属职务']],
+    ['familyPhone', ['家庭成员电话', '亲属联系电话', '家属电话', '亲属电话', '成员电话']],
     ['school', ['最高学历院校', '毕业学校', '毕业院校', '就读院校', '学校名称', '院校名称', 'school', 'university']],
     ['college', ['所属学院', '院系名称', '学院', '院系']],
     ['major', ['所学专业', '专业名称', '专业', 'major']],
     ['degree', ['最高学历', '学历学位', '学历层次', '学历', '学位', 'degree']],
     ['degreeType', ['培养方式', '学习形式', '学历类型', '是否全日制', '全日制']],
+    ['schoolType', ['院校层次', '学校层次', '院校类别', '学校类型']],
     ['gpa', ['平均绩点', 'gpa', '绩点', '平均分']],
     ['rank', ['专业排名', '成绩排名', '班级排名', '排名']],
     ['courses', ['主修课程', '核心课程', '专业课程']],
@@ -937,7 +1030,7 @@
     ['projectDescription', ['项目描述', '项目背景', '项目简介', '项目介绍', '项目内容', '项目概述']],
     ['skills', ['专业技能', '技能特长', '个人技能', '技能']],
     ['introduction', ['自我介绍', '个人简介', '自我评价', '个人评价', '开放问答题', '开放题']],
-    ['location', ['现居住地', '目前所在地', '居住地', '所在地', '现居地', '地址']],
+    ['location', ['居住地址', '通信地址', '联系地址', '所在地', '地址']],
     ['city', ['城市']],
     ['github', ['github']],
     ['linkedin', ['linkedin', '领英']],
@@ -967,6 +1060,20 @@
       ['projectRole', ['角色', '担任']],
       ['projectStartDate', ['开始时间', '开始日期', '起始时间']],
       ['projectEndDate', ['结束时间', '结束日期', '截止时间']]
+    ],
+    family: [
+      ['familyName', ['姓名', '名称']],
+      ['familyRelation', ['关系', '与本人关系']],
+      ['familyEmployer', ['工作单位', '单位']],
+      ['familyPosition', ['职务', '职位']],
+      ['familyPhone', ['联系电话', '电话', '手机']]
+    ],
+    certificate: [
+      ['certificates', ['证书名称', '名称']],
+      ['certificateCode', ['证书编号', '编号']],
+      ['certificateIssuer', ['颁发机构', '发证机构', '机构']],
+      ['certificateDate', ['取得日期', '发证日期', '日期']],
+      ['certificateExpiryDate', ['有效期至', '有效期']]
     ]
   };
 
@@ -1005,17 +1112,26 @@
       if (section === 'work') return 'workStartDate';
       if (section === 'project') return 'projectStartDate';
       if (section === 'birth') return 'birthDate';
-      return 'eduStartDate';
+      if (section === 'certificate') return 'certificateDate';
+      if (section !== 'family') return 'eduStartDate';
     }
     if (hint && /开始时间|开始日期|起始时间|起始日期/.test(hint)) {
       if (section === 'work') return 'workStartDate';
       if (section === 'project') return 'projectStartDate';
-      return 'eduStartDate';
+      if (section === 'edu') return 'eduStartDate';
+      if (section === 'certificate') return 'certificateDate';
     }
     if (hint && /结束时间|结束日期|截止时间|截止日期/.test(hint)) {
       if (section === 'work') return 'workEndDate';
       if (section === 'project') return 'projectEndDate';
-      return 'eduEndDate';
+      if (section === 'edu') return 'eduEndDate';
+      if (section === 'certificate') return 'certificateExpiryDate';
+    }
+
+    const familyHint = hint && /家庭成员|家属|亲属|直系|父亲姓名|母亲姓名|配偶姓名|家人姓名|familymember|relativename/.test(hint);
+    if (hint && (section === 'family' || familyHint) && SECTION_SHORT_ALIASES.family) {
+      const familyHit = matchAliasTable(hint, SECTION_SHORT_ALIASES.family, 80);
+      if (familyHit) return familyHit;
     }
 
     if (hint && section && SECTION_SHORT_ALIASES[section]) {
@@ -1078,9 +1194,13 @@
     // 2. 扫描所有可填充的网申输入框
     const inputs = document.querySelectorAll(
       'input[type="text"], input[type="email"], input[type="tel"], ' +
-      'input[type="number"], input[type="date"], input[type="search"], input[type="radio"], input:not([type]), ' +
-      'textarea, select, [role="combobox"]'
+      'input[type="number"], input[type="date"], input[type="month"], input[type="url"], input[type="search"], input[type="radio"], input:not([type]), ' +
+      'textarea, select, [role="combobox"], [contenteditable="true"]'
     );
+    // 组件外壳和内部输入框只扫描一次，避免经历计数错位。
+    const fields = [...new Set([...inputs].map((el) => writableBox(el)))].filter((el) =>
+      !isIgnoredInput(el) && (isElementTrulyVisible(el) ||
+        (isSelectWidget(el) && isElementTrulyVisible(el.closest('.ant-select, .el-select, .rc-select, .semi-select, .arco-select')))));
 
     console.log(`[Capybara助手] 扫描到 ${inputs.length} 个输入框`);
     if (typeof appLog !== 'undefined') {
@@ -1091,7 +1211,7 @@
     }
 
     // 预探测：页面上是否同时存在独立的项目职责/工作成果框
-    const matchedTypes = Array.from(inputs).map(el => matchFieldType(el)).filter(Boolean);
+    const matchedTypes = fields.map(el => matchFieldType(el)).filter(Boolean);
     const hasSeparateProjResp = matchedTypes.includes('projectResponsibilities');
     const hasSeparateProjAchieve = matchedTypes.includes('projectAchievements');
     const hasSeparateTechStack = matchedTypes.includes('techStack');
@@ -1100,9 +1220,13 @@
     let currentProjIdx = 0;
     let currentWorkIdx = 0;
     let currentEduIdx = 0;
+    let currentFamilyIdx = 0;
+    let currentCertificateIdx = 0;
     let seenProjNames = 0;
     let seenCompanies = 0;
     let seenSchools = 0;
+    let seenFamilyNames = 0;
+    let seenCertificates = 0;
 
     const projList = (profile.projects || []).filter((item) =>
       item && [item.name, item.description, item.responsibilities, item.achievements].some((value) => String(value || '').trim())
@@ -1113,8 +1237,14 @@
     const eduList = (profile.education || []).filter((item) =>
       item && [item.school, item.major, item.degree].some((value) => String(value || '').trim())
     );
+    const familyList = (profile.familyMembers || []).filter((item) =>
+      item && [item.name, item.relation, item.employer, item.position, item.phone].some((value) => String(value || '').trim())
+    );
+    const certificateList = (profile.certificates || []).map((item) =>
+      typeof item === 'string' ? { name: item } : item
+    ).filter((item) => item && [item.name, item.code, item.issuer].some((value) => String(value || '').trim()));
 
-    for (const input of inputs) {
+    for (const input of fields) {
       if (isIgnoredInput(input)) continue;
 
       const fieldType = matchFieldType(input);
@@ -1130,6 +1260,12 @@
       } else if (fieldType === 'school') {
         if (seenSchools > 0) currentEduIdx++;
         seenSchools++;
+      } else if (fieldType === 'familyName') {
+        if (seenFamilyNames > 0) currentFamilyIdx++;
+        seenFamilyNames++;
+      } else if (fieldType === 'certificates') {
+        if (seenCertificates > 0) currentCertificateIdx++;
+        seenCertificates++;
       }
 
       if (input.type !== 'radio' && input.type !== 'checkbox' && fieldHasValue(input)) continue;
@@ -1150,6 +1286,8 @@
       const edu = eduList[currentEduIdx] || {};
       const eduStart = parseYearMonth(edu.startDate);
       const eduEnd = parseYearMonth(edu.endDate);
+      const family = familyList[currentFamilyIdx] || {};
+      const certificate = certificateList[currentCertificateIdx] || {};
 
       let valueToFill = null;
       const isSelect = input.tagName.toLowerCase() === 'select';
@@ -1199,6 +1337,12 @@
         case 'graduationDate':
           valueToFill = profile.basicInfo?.graduationDate;
           break;
+        case 'maritalStatus':
+          valueToFill = profile.basicInfo?.maritalStatus;
+          break;
+        case 'currentCity':
+          valueToFill = profile.basicInfo?.currentCity;
+          break;
         case 'emergencyContact':
           valueToFill = profile.basicInfo?.emergencyContact;
           break;
@@ -1225,6 +1369,12 @@
         case 'referralCode':
           valueToFill = profile.jobIntention?.referralCode;
           break;
+        case 'recruitSource':
+          valueToFill = profile.jobIntention?.recruitSource;
+          break;
+        case 'willingToTravel':
+          valueToFill = profile.jobIntention?.willingToTravel;
+          break;
 
         // 语言外语
         case 'cet4':
@@ -1239,12 +1389,45 @@
         case 'toefl':
           valueToFill = profile.languageSkills?.toefl;
           break;
+        case 'otherLanguages':
+          valueToFill = profile.languageSkills?.otherLanguages;
+          break;
 
         // 荣誉奖项
         case 'awards':
           if (Array.isArray(profile.awards) && profile.awards.length) {
             valueToFill = profile.awards.map(a => `${a.date || ''} ${a.name} (${a.level || '校级'})`.trim()).join('；');
           }
+          break;
+        case 'certificates':
+          valueToFill = certificate.name || certificateList.map((item) => item.name).filter(Boolean).join('；');
+          break;
+        case 'certificateCode':
+          valueToFill = certificate.code;
+          break;
+        case 'certificateIssuer':
+          valueToFill = certificate.issuer;
+          break;
+        case 'certificateDate':
+          valueToFill = certificate.date;
+          break;
+        case 'certificateExpiryDate':
+          valueToFill = certificate.expiryDate;
+          break;
+        case 'familyName':
+          valueToFill = family.name;
+          break;
+        case 'familyRelation':
+          valueToFill = family.relation;
+          break;
+        case 'familyEmployer':
+          valueToFill = family.employer;
+          break;
+        case 'familyPosition':
+          valueToFill = family.position;
+          break;
+        case 'familyPhone':
+          valueToFill = family.phone;
           break;
 
         // 地址信息
@@ -1297,6 +1480,9 @@
           break;
         case 'degreeType':
           valueToFill = edu.degreeType;
+          break;
+        case 'schoolType':
+          valueToFill = edu.schoolType;
           break;
         case 'gpa':
           valueToFill = edu.gpa;
@@ -1830,9 +2016,11 @@
   function classifySectionTitle(text) {
     const t = String(text || '').replace(/\s+/g, '').slice(0, 24);
     if (!t || t.length > 18) return '';
+    if (/家庭成员|家庭情况|家属信息|亲属信息|直系亲属|家庭信息/.test(t)) return 'family';
+    if (/资格证书|职业证书|证书信息|所获证书/.test(t)) return 'certificate';
     if (/教育经历|教育背景|教育信息|学习经历|学历信息/.test(t) || (/教育|学历|院校/.test(t) && !/最高学历/.test(t))) return 'edu';
-    if (/项目经历|项目经验|项目信息|项目/.test(t)) return 'project';
-    if (/工作经历|实习经历|工作经验|任职/.test(t) || (/实习|工作/.test(t) && !/工作职责|工作日/.test(t))) return 'work';
+    if (/项目经历|项目经验|项目信息/.test(t) || (/项目/.test(t) && !/项目名称|项目角色|项目描述|项目职责|项目成果/.test(t))) return 'project';
+    if (/工作经历|实习经历|工作经验|任职经历|工作信息|实习信息/.test(t) || /^(实习|工作|任职)$/.test(t)) return 'work';
     if (/出生|生日/.test(t)) return 'birth';
     return '';
   }
@@ -1899,7 +2087,7 @@
     const controls = [...document.querySelectorAll(
       'select, [role="combobox"], input[placeholder="年"], input[placeholder="月"], input[placeholder="年份"], input[placeholder="月份"]'
     )].filter((el) => {
-      if (!el || el.disabled) return false;
+      if (isIgnoredInput(el) || !isElementTrulyVisible(el)) return false;
       if (el.closest('#job-autofill-dock, #job-autofill-copy-panel, #job-autofill-ai-panel, #job-autofill-log-panel')) return false;
       return isYearControl(el) || isMonthControl(el);
     });
@@ -1919,9 +2107,9 @@
       if (kind === 'birth') {
         source = parseYearMonth(profile.basicInfo?.birthDate);
         if (isYearControl(el) && source.year) {
-          if (await fillField(el, source.year)) filled++;
+          if (!fieldHasValue(el) && await fillField(el, source.year)) filled++;
         } else if (isMonthControl(el) && source.month) {
-          if (await fillField(el, source.month)) filled++;
+          if (!fieldHasValue(el) && await fillField(el, source.month)) filled++;
         }
         i++;
         continue;
@@ -1929,7 +2117,7 @@
 
       const list = kind === 'work' ? work : kind === 'project' ? proj : edu;
       const idx = counters[kind] || 0;
-      const item = list[idx] || list[0];
+      const item = list[idx];
       if (!item) {
         i++;
         continue;
@@ -1941,6 +2129,7 @@
       const elTop = el.getBoundingClientRect().top;
       while (i + group.length < controls.length) {
         const next = controls[i + group.length];
+        if (nearestSectionKind(next) !== nearestSectionKind(el)) break;
         if (Math.abs(next.getBoundingClientRect().top - elTop) > 28) break;
         group.push(next);
         if (group.length >= 4) break;
@@ -1950,7 +2139,7 @@
         ? [start.year, start.month, end.year, end.month]
         : [start.year, start.month];
       for (let g = 0; g < group.length && g < seq.length; g++) {
-        if (seq[g] && await fillField(group[g], seq[g])) filled++;
+        if (seq[g] && !fieldHasValue(group[g]) && await fillField(group[g], seq[g])) filled++;
       }
       counters[kind] = idx + 1;
       i += group.length;
@@ -2016,6 +2205,8 @@
 
   function isElementTrulyVisible(el) {
     if (!el || el.disabled) return false;
+    const style = getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.visibility === 'collapse' || style.display === 'none') return false;
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) return true;
     return el.getClientRects && el.getClientRects().length > 0;
@@ -2023,6 +2214,10 @@
 
   function fieldHasValue(el) {
     if (el.isContentEditable) return !!(el.textContent || '').trim();
+    if (el.tagName === 'SELECT') {
+      const option = el.options[el.selectedIndex];
+      return !!option && !!el.value && !/^(请选择.*|请选择|please\s+select.*|select(?:\s.*)?|年|月|日|[-—]+)$/i.test(option.text.trim());
+    }
     if ((el.value || '').trim()) return true;
     const wrap = el.closest('.ant-select, .el-select, .rc-select');
     if (wrap) {
@@ -2655,11 +2850,12 @@
   const FIELD_LABELS = {
     fullName: '姓名', firstName: '名', lastName: '姓', middleName: '中间名',
     phone: '手机号码', phoneType: '手机类型', email: '电子邮箱', gender: '性别', birthDate: '出生日期', idCard: '身份证号',
-    politicalStatus: '政治面貌', ethnicity: '民族', hometown: '籍贯/生源地', graduationDate: '毕业时间',
+    politicalStatus: '政治面貌', ethnicity: '民族', hometown: '籍贯/生源地', graduationDate: '毕业时间', maritalStatus: '婚姻状况', currentCity: '现居住城市',
     emergencyContact: '紧急联系人', emergencyRelation: '联系人关系', emergencyPhone: '联系人电话',
-    expectedCity: '期望城市', expectedPosition: '期望岗位', expectedSalary: '期望薪资', availableDate: '到岗时间', referralCode: '内推码',
-    cet4: '英语四级', cet6: '英语六级', ielts: '雅思成绩', toefl: '托福成绩', awards: '荣誉奖项',
-    school: '毕业院校', college: '所属学院', major: '专业名称', degree: '学历学位', degreeType: '培养方式', gpa: 'GPA绩点', rank: '成绩排名', courses: '主修课程', eduStartDate: '入学时间', eduEndDate: '毕业时间',
+    expectedCity: '期望城市', expectedPosition: '期望岗位', expectedSalary: '期望薪资', availableDate: '到岗时间', referralCode: '内推码', recruitSource: '招聘渠道', willingToTravel: '是否可出差',
+    cet4: '英语四级', cet6: '英语六级', ielts: '雅思成绩', toefl: '托福成绩', otherLanguages: '其他外语', awards: '荣誉奖项', certificates: '资格证书', certificateCode: '证书编号', certificateIssuer: '颁发机构', certificateDate: '取得日期', certificateExpiryDate: '有效期至',
+    familyName: '家庭成员姓名', familyRelation: '亲属关系', familyEmployer: '家庭成员工作单位', familyPosition: '家庭成员职务', familyPhone: '家庭成员电话',
+    school: '毕业院校', college: '所属学院', major: '专业名称', degree: '学历学位', degreeType: '培养方式', schoolType: '院校层次', gpa: 'GPA绩点', rank: '成绩排名', courses: '主修课程', eduStartDate: '入学时间', eduEndDate: '毕业时间',
     company: '公司名称', position: '担任职位', department: '所属部门', workCity: '工作城市', workStartDate: '入职时间', workEndDate: '离职时间', workDescription: '工作内容', workAchievements: '工作成果',
     projectName: '项目名称', projectRole: '项目角色', projectStartDate: '项目开始', projectEndDate: '项目结束', projectResponsibilities: '项目中职责', projectAchievements: '项目成果', techStack: '技术栈', projectDescription: '项目描述', projectUrl: '项目链接',
     skills: '专业技能', advantage: '个人优势', intro: '自我介绍',
@@ -3013,14 +3209,26 @@
       pushCopyRow(items, '政治面貌', b.politicalStatus);
       pushCopyRow(items, '民族', b.ethnicity);
       pushCopyRow(items, '籍贯/生源地', b.hometown);
-      pushCopyRow(items, '现居地', b.location || b.city);
+      pushCopyRow(items, '现居住城市', b.currentCity || b.location || b.city);
+      pushCopyRow(items, '婚姻状况', b.maritalStatus);
       pushCopyRow(items, '毕业时间', b.graduationDate);
       pushCopyRow(items, '期望城市', ji.expectedCity);
       pushCopyRow(items, '期望岗位', ji.expectedPosition);
       pushCopyRow(items, '期望薪资', ji.expectedSalary);
       pushCopyRow(items, '到岗时间', ji.availableDate);
       pushCopyRow(items, '内推码', ji.referralCode);
+      pushCopyRow(items, '招聘渠道', ji.recruitSource);
+      pushCopyRow(items, '出差意愿', ji.willingToTravel);
       pushCopyRow(items, '紧急联系人', `${b.emergencyContact || ''} ${b.emergencyRelation ? '(' + b.emergencyRelation + ')' : ''} ${b.emergencyPhone || ''}`.trim());
+      (profile.familyMembers || []).forEach((member, i) => {
+        if (!member || !(member.name || member.relation)) return;
+        const prefix = `家属${i + 1} · `;
+        pushCopyRow(items, `${prefix}姓名`, member.name);
+        pushCopyRow(items, `${prefix}关系`, member.relation);
+        pushCopyRow(items, `${prefix}单位`, member.employer);
+        pushCopyRow(items, `${prefix}职务`, member.position);
+        pushCopyRow(items, `${prefix}电话`, member.phone);
+      });
     } else if (category === 'edu') {
       (profile.education || []).forEach((edu, i) => {
         if (!edu || !(edu.school || edu.major)) return;
@@ -3030,6 +3238,7 @@
         pushCopyRow(items, `${prefix}专业`, edu.major);
         pushCopyRow(items, `${prefix}学历`, edu.degree);
         pushCopyRow(items, `${prefix}培养方式`, edu.degreeType);
+        pushCopyRow(items, `${prefix}院校层次`, edu.schoolType);
         pushCopyRow(items, `${prefix}起止`, joinDateRange(edu.startDate, edu.endDate));
         pushCopyRow(items, `${prefix}GPA`, edu.gpa);
         pushCopyRow(items, `${prefix}排名`, edu.rank);
@@ -3039,7 +3248,18 @@
       pushCopyRow(items, '英语六级', ls.cet6);
       pushCopyRow(items, '雅思', ls.ielts);
       pushCopyRow(items, '托福', ls.toefl);
+      pushCopyRow(items, '其他外语', ls.otherLanguages);
       pushCopyRow(items, '荣誉奖项', (profile.awards || []).filter((a) => a && a.name).map((a) => `${a.date || ''} ${a.name} ${a.level || ''}`.trim()).join('\n'));
+      (profile.certificates || []).map((item) => typeof item === 'string' ? { name: item } : item)
+        .filter((item) => item && item.name)
+        .forEach((certificate, i) => {
+          const prefix = `证书${i + 1} · `;
+          pushCopyRow(items, `${prefix}名称`, certificate.name);
+          pushCopyRow(items, `${prefix}编号`, certificate.code);
+          pushCopyRow(items, `${prefix}机构`, certificate.issuer);
+          pushCopyRow(items, `${prefix}日期`, certificate.date);
+          pushCopyRow(items, `${prefix}有效期`, certificate.expiryDate);
+        });
     } else if (category === 'exp') {
       (profile.workExperience || []).forEach((work, i) => {
         if (!work || !(work.company || work.position || work.description)) return;

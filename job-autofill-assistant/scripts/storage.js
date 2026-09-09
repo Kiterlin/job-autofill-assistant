@@ -55,7 +55,11 @@ class StorageManager {
         linkedin: '',
         github: '',
         website: '',
-        twitter: ''
+        twitter: '',
+
+        // 补充信息（国企/银行/大厂高频）
+        maritalStatus: '',     // 婚姻状况 (未婚, 已婚, 离异)
+        currentCity: ''        // 现居住城市 (如: 上海) — 与籍贯/户籍分离
       },
 
       // 求职意向与偏好
@@ -64,7 +68,9 @@ class StorageManager {
         expectedPosition: '',  // 期望岗位 (如: 前端开发工程师)
         expectedSalary: '',    // 期望薪资
         availableDate: '',     // 到岗时间 (如: 随时到岗, 2026年7月)
-        referralCode: ''       // 内推码 / 推荐人
+        referralCode: '',      // 内推码 / 推荐人
+        recruitSource: '',     // 招聘渠道 (如: 校招官网, 内推, 牛客网, 同学推荐)
+        willingToTravel: ''    // 是否愿意出差/驻外 (愿意, 不愿意, 视情况而定)
       },
 
       // 语言能力与成绩
@@ -75,6 +81,18 @@ class StorageManager {
         toefl: '',             // 托福成绩 (如: 105)
         otherLanguages: ''     // 其他外语 (如: 日语N1)
       },
+
+      // 家庭成员（华为/银行系/国企必填）
+      familyMembers: [
+        {
+          id: this.generateId(),
+          name: '',            // 成员姓名
+          relation: '',        // 与本人关系 (父亲, 母亲, 配偶, 兄弟姐妹)
+          employer: '',        // 工作单位
+          position: '',        // 职务
+          phone: ''            // 联系电话
+        }
+      ],
 
       // 荣誉与竞赛奖励
       awards: [
@@ -95,6 +113,7 @@ class StorageManager {
           major: '',           // 专业全称
           degree: '',          // 学历 (大专/本科/硕士/博士)
           degreeType: '',      // 培养方式 (普通全日制统招, 非全日制, 留学生)
+          schoolType: '',      // 院校层次 (985, 211, 双一流, 普通本科, 专科)
           startDate: '',       // 入学时间
           endDate: '',         // 毕业时间
           gpa: '',             // GPA成绩 (如: 3.8/4.0)
@@ -140,8 +159,17 @@ class StorageManager {
       // 技能标签
       skills: [],
 
-      // 证书
-      certificates: [],
+      // 证书（兼容旧版字符串数组）
+      certificates: [
+        {
+          id: this.generateId(),
+          name: '',            // 证书名称
+          code: '',            // 证书编号
+          issuer: '',          // 颁发机构
+          date: '',            // 取得日期
+          expiryDate: ''       // 有效期至
+        }
+      ],
 
       // 自我介绍模板
       introTemplates: {
@@ -213,8 +241,9 @@ class StorageManager {
 
           // 数据校验
           if (data && this.validateData(data)) {
-            console.log('[存储] 数据加载成功，大小:', JSON.stringify(data).length, '字节');
-            resolve(data);
+            const normalized = this.fixData(data);
+            console.log('[存储] 数据加载成功，大小:', JSON.stringify(normalized).length, '字节');
+            resolve(normalized);
           } else if (data) {
             console.warn('[存储] 数据格式异常，尝试修复');
             const fixed = this.fixData(data);
@@ -296,9 +325,23 @@ class StorageManager {
 
   // 数据修复
   fixData(data) {
-    console.log('[存储] 执行数据修复');
-    if (!data.profiles) data.profiles = [];
-    if (!data.settings) data.settings = {};
+    if (!Array.isArray(data.profiles)) data.profiles = [];
+    if (!data.settings || typeof data.settings !== 'object') data.settings = {};
+    data.profiles.forEach((profile) => {
+      profile.basicInfo = profile.basicInfo || {};
+      profile.jobIntention = profile.jobIntention || {};
+      profile.languageSkills = profile.languageSkills || {};
+      if (!Array.isArray(profile.familyMembers)) profile.familyMembers = [];
+      if (!Array.isArray(profile.awards)) profile.awards = [];
+      if (!Array.isArray(profile.education)) profile.education = [];
+      if (!Array.isArray(profile.workExperience)) profile.workExperience = [];
+      if (!Array.isArray(profile.projects)) profile.projects = [];
+      if (!Array.isArray(profile.skills)) profile.skills = [];
+      if (!Array.isArray(profile.certificates)) profile.certificates = [];
+      profile.certificates = profile.certificates.map((item) => typeof item === 'string' ? {
+        id: this.generateId(), name: item, code: '', issuer: '', date: '', expiryDate: ''
+      } : item);
+    });
     if (!data.activeProfileId && data.profiles.length > 0) {
       data.activeProfileId = data.profiles[0].id;
     }
@@ -441,12 +484,16 @@ class StorageManager {
         profile.education.push({
           id: this.generateId(),
           school: '',
+          college: '',
           major: '',
           degree: '',
+          degreeType: '',
+          schoolType: '',
           startDate: '',
           endDate: '',
           gpa: '',
           rank: '',
+          courses: '',
           description: ''
         });
         await this.saveAll(data);
@@ -485,10 +532,14 @@ class StorageManager {
         profile.workExperience.push({
           id: this.generateId(),
           company: '',
+          department: '',
           position: '',
+          workType: '',
+          city: '',
           startDate: '',
           endDate: '',
-          description: ''
+          description: '',
+          achievements: ''
         });
         await this.saveAll(data);
         return true;
@@ -527,10 +578,13 @@ class StorageManager {
           id: this.generateId(),
           name: '',
           role: '',
+          projectType: '',
+          techStack: '',
           startDate: '',
           endDate: '',
-          technologies: [],
+          projectUrl: '',
           description: '',
+          responsibilities: '',
           achievements: ''
         });
         await this.saveAll(data);

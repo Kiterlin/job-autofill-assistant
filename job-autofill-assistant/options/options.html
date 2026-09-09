@@ -170,6 +170,14 @@
           </span>
           <span class="nav-text">求职意向与语言</span>
         </a>
+        <a href="#section-family" class="sidebar-link" data-section="section-family">
+          <span class="nav-icon">👪</span>
+          <span class="nav-text">家庭成员</span>
+        </a>
+        <a href="#section-certificates" class="sidebar-link" data-section="section-certificates">
+          <span class="nav-icon">📜</span>
+          <span class="nav-text">资格证书</span>
+        </a>
         <a href="#section-awards" class="sidebar-link" data-section="section-awards">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>
@@ -563,6 +571,25 @@
               <input type="text" id="graduationDate" placeholder="如: 2026-06">
             </div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>婚姻状况</label>
+              <div class="select-box">
+                <select id="maritalStatus">
+                  <option value="">请选择</option>
+                  <option value="未婚">未婚</option>
+                  <option value="已婚">已婚</option>
+                  <option value="离异">离异</option>
+                  <option value="丧偶">丧偶</option>
+                </select>
+                <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>现居住城市</label>
+              <input type="text" id="currentCity" placeholder="如: 上海市浦东新区">
+            </div>
+          </div>
         </div>
 
         <!-- 子区域 3: 紧急联系人 -->
@@ -682,7 +709,7 @@
               <input type="text" id="expectedSalary" placeholder="例如: 18k-25k 或 面议">
             </div>
           </div>
-          <div class="form-row">
+          <div class="form-row form-row-4">
             <div class="form-group">
               <label>最快到岗时间</label>
               <input type="text" id="availableDate" placeholder="例如: 随时到岗 / 毕业后即刻到岗 / 2周内">
@@ -690,6 +717,22 @@
             <div class="form-group">
               <label>常用内推码 / 推荐人</label>
               <input type="text" id="referralCode" placeholder="例如: NTAXXX 或 张某某">
+            </div>
+            <div class="form-group">
+              <label>招聘信息来源</label>
+              <input type="text" id="recruitSource" placeholder="例如: 校招官网 / 内推 / 牛客网">
+            </div>
+            <div class="form-group">
+              <label>出差 / 驻外意愿</label>
+              <div class="select-box">
+                <select id="willingToTravel">
+                  <option value="">请选择</option>
+                  <option value="愿意">愿意</option>
+                  <option value="不愿意">不愿意</option>
+                  <option value="视情况而定">视情况而定</option>
+                </select>
+                <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </div>
             </div>
           </div>
         </div>
@@ -725,6 +768,25 @@
         </div>
       </section>
 
+      <!-- 家庭成员 -->
+      <section id="section-family" class="section glass">
+        <div class="section-header">
+          <div class="section-title-wrap">
+            <div class="section-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </div>
+            <div>
+              <h2 class="section-title">家庭成员</h2>
+              <p class="section-subtitle">华为、银行及国企网申常见字段；请按实际要求填写</p>
+            </div>
+          </div>
+          <button id="addFamilyBtn" class="btn-add-item" type="button">
+            <span>添加家庭成员</span>
+          </button>
+        </div>
+        <div id="familyList" class="item-list"></div>
+      </section>
+
       <!-- 荣誉奖励与竞赛经历 (新增独立动态列表) -->
       <section id="section-awards" class="section glass">
         <div class="section-header">
@@ -749,6 +811,25 @@
           </button>
         </div>
         <div id="awardsList" class="item-list"></div>
+      </section>
+
+      <!-- 资格证书 -->
+      <section id="section-certificates" class="section glass">
+        <div class="section-header">
+          <div class="section-title-wrap">
+            <div class="section-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"></path><path d="M8 9h8M8 13h6"></path></svg>
+            </div>
+            <div>
+              <h2 class="section-title">资格证书</h2>
+              <p class="section-subtitle">证书名称、编号、颁发机构及有效期</p>
+            </div>
+          </div>
+          <button id="addCertificateBtn" class="btn-add-item" type="button">
+            <span>添加证书</span>
+          </button>
+        </div>
+        <div id="certificatesList" class="item-list"></div>
       </section>
 
       <!-- 教育经历 (全面增强) -->

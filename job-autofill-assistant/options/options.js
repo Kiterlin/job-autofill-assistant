@@ -159,6 +159,7 @@ function emptyEducation() {
     major: '',
     degree: '',
     degreeType: '普通全日制统招',
+    schoolType: '',
     startDate: '',
     endDate: '',
     gpa: '',
@@ -207,6 +208,37 @@ function emptyAward() {
     date: ''
   };
 }
+
+function emptyFamilyMember() {
+  return {
+    id: generateId(),
+    name: '',
+    relation: '',
+    employer: '',
+    position: '',
+    phone: ''
+  };
+}
+
+function emptyCertificate() {
+  return {
+    id: generateId(),
+    name: '',
+    code: '',
+    issuer: '',
+    date: '',
+    expiryDate: ''
+  };
+}
+
+function normalizeCertificates(certificates) {
+  return (Array.isArray(certificates) ? certificates : []).map((item) =>
+    typeof item === 'string'
+      ? { ...emptyCertificate(), name: item }
+      : { ...emptyCertificate(), ...(item || {}), id: item?.id || generateId() }
+  );
+}
+
 
 function collectAiSettingsFromDom() {
   return {
@@ -841,6 +873,8 @@ function loadProfileToForm(profile) {
   setInputValue('ethnicity', info.ethnicity);
   setInputValue('hometown', info.hometown);
   setInputValue('graduationDate', info.graduationDate);
+  setInputValue('maritalStatus', info.maritalStatus);
+  setInputValue('currentCity', info.currentCity);
   setInputValue('emergencyContact', info.emergencyContact);
   setInputValue('emergencyRelation', info.emergencyRelation);
   setInputValue('emergencyPhone', info.emergencyPhone);
@@ -861,6 +895,8 @@ function loadProfileToForm(profile) {
   setInputValue('expectedSalary', job.expectedSalary);
   setInputValue('availableDate', job.availableDate);
   setInputValue('referralCode', job.referralCode);
+  setInputValue('recruitSource', job.recruitSource);
+  setInputValue('willingToTravel', job.willingToTravel);
 
   // 语言能力
   const lang = profile.languageSkills || {};
@@ -875,6 +911,9 @@ function loadProfileToForm(profile) {
   renderWorkList(profile.workExperience && profile.workExperience.length ? profile.workExperience : [emptyWork()]);
   renderProjectList(profile.projects && profile.projects.length ? profile.projects : [emptyProject()]);
   renderAwardsList(profile.awards && profile.awards.length ? profile.awards : [emptyAward()]);
+  renderFamilyList(profile.familyMembers && profile.familyMembers.length ? profile.familyMembers : [emptyFamilyMember()]);
+  const certificates = normalizeCertificates(profile.certificates);
+  renderCertificatesList(certificates.length ? certificates : [emptyCertificate()]);
   renderSkillsList(profile.skills || []);
 
   document.getElementById('introduction').value = profile.introTemplates?.default || '';
@@ -938,6 +977,20 @@ function renderEducationList(educationList) {
               <option value="非全日制" ${edu.degreeType === '非全日制' ? 'selected' : ''}>非全日制</option>
               <option value="海外留学生" ${edu.degreeType === '海外留学生' ? 'selected' : ''}>海外留学生</option>
               <option value="定向委培" ${edu.degreeType === '定向委培' ? 'selected' : ''}>定向委培</option>
+            </select>
+            <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>院校层次</label>
+          <div class="select-box">
+            <select class="edu-school-type">
+              <option value="">请选择</option>
+              <option value="985" ${edu.schoolType === '985' ? 'selected' : ''}>985</option>
+              <option value="211" ${edu.schoolType === '211' ? 'selected' : ''}>211</option>
+              <option value="双一流" ${edu.schoolType === '双一流' ? 'selected' : ''}>双一流</option>
+              <option value="普通本科" ${edu.schoolType === '普通本科' ? 'selected' : ''}>普通本科</option>
+              <option value="专科" ${edu.schoolType === '专科' ? 'selected' : ''}>专科</option>
             </select>
             <svg class="field-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </div>
@@ -1169,6 +1222,62 @@ function renderAwardsList(awardsList) {
   initAllAppleSelects(container);
 }
 
+function renderFamilyList(members) {
+  const container = document.getElementById('familyList');
+  if (!container) return;
+  container.innerHTML = '';
+  members.forEach((member, index) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML = `
+      <div class="item-card-header">
+        <h4>家庭成员 ${index + 1}</h4>
+        <button type="button" class="btn-delete" data-id="${attr(member.id)}" data-type="family">删除成员</button>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group"><label>姓名</label><input type="text" class="family-name" data-id="${attr(member.id)}" value="${attr(member.name)}"></div>
+        <div class="form-group"><label>与本人关系</label><input type="text" class="family-relation" value="${attr(member.relation)}" placeholder="父亲 / 母亲 / 配偶"></div>
+        <div class="form-group"><label>联系电话</label><input type="tel" class="family-phone" value="${attr(member.phone)}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>工作单位</label><input type="text" class="family-employer" value="${attr(member.employer)}"></div>
+        <div class="form-group"><label>职务</label><input type="text" class="family-position" value="${attr(member.position)}"></div>
+      </div>`;
+    container.appendChild(card);
+  });
+  container.querySelectorAll('.btn-delete[data-type="family"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteFamilyMember(e.currentTarget.getAttribute('data-id')));
+  });
+}
+
+function renderCertificatesList(certificates) {
+  const container = document.getElementById('certificatesList');
+  if (!container) return;
+  container.innerHTML = '';
+  certificates.forEach((certificate, index) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML = `
+      <div class="item-card-header">
+        <h4>资格证书 ${index + 1}</h4>
+        <button type="button" class="btn-delete" data-id="${attr(certificate.id)}" data-type="certificate">删除证书</button>
+      </div>
+      <div class="form-row form-row-3">
+        <div class="form-group"><label>证书名称</label><input type="text" class="certificate-name" data-id="${attr(certificate.id)}" value="${attr(certificate.name)}"></div>
+        <div class="form-group"><label>证书编号</label><input type="text" class="certificate-code" value="${attr(certificate.code)}"></div>
+        <div class="form-group"><label>颁发机构</label><input type="text" class="certificate-issuer" value="${attr(certificate.issuer)}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>取得日期</label><input type="text" class="certificate-date" value="${attr(certificate.date)}" placeholder="例如: 2025-06"></div>
+        <div class="form-group"><label>有效期至</label><input type="text" class="certificate-expiry" value="${attr(certificate.expiryDate)}" placeholder="例如: 2030-06 / 长期"></div>
+      </div>`;
+    container.appendChild(card);
+  });
+  container.querySelectorAll('.btn-delete[data-type="certificate"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => deleteCertificate(e.currentTarget.getAttribute('data-id')));
+  });
+}
+
 function renderSkillsList(skills) {
   const container = document.getElementById('skillsList');
   container.innerHTML = '';
@@ -1214,9 +1323,9 @@ function bindEvents() {
   document.getElementById('addWorkBtn').addEventListener('click', () => addWorkExperience());
   document.getElementById('addProjectBtn').addEventListener('click', () => addProject());
   const addAwardBtn = document.getElementById('addAwardBtn');
-  if (addAwardBtn) {
-    addAwardBtn.addEventListener('click', () => addAward());
-  }
+  if (addAwardBtn) addAwardBtn.addEventListener('click', () => addAward());
+  document.getElementById('addFamilyBtn')?.addEventListener('click', addFamilyMember);
+  document.getElementById('addCertificateBtn')?.addEventListener('click', addCertificate);
 
   document.getElementById('skillInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
@@ -1453,6 +1562,7 @@ function collectEducationData() {
       major: card.querySelector('.edu-major').value.trim(),
       degree: card.querySelector('.edu-degree').value,
       degreeType: card.querySelector('.edu-degree-type')?.value || '普通全日制统招',
+      schoolType: card.querySelector('.edu-school-type')?.value || '',
       gpa: card.querySelector('.edu-gpa').value.trim(),
       rank: card.querySelector('.edu-rank')?.value.trim() || '',
       startDate: card.querySelector('.edu-start')?.value.trim() || '',
@@ -1517,6 +1627,28 @@ function collectAwardsData() {
   return awards;
 }
 
+function collectFamilyData() {
+  return [...document.querySelectorAll('#familyList .item-card')].map((card) => ({
+    id: card.querySelector('.family-name')?.getAttribute('data-id') || generateId(),
+    name: card.querySelector('.family-name')?.value.trim() || '',
+    relation: card.querySelector('.family-relation')?.value.trim() || '',
+    employer: card.querySelector('.family-employer')?.value.trim() || '',
+    position: card.querySelector('.family-position')?.value.trim() || '',
+    phone: card.querySelector('.family-phone')?.value.trim() || ''
+  }));
+}
+
+function collectCertificatesData() {
+  return [...document.querySelectorAll('#certificatesList .item-card')].map((card) => ({
+    id: card.querySelector('.certificate-name')?.getAttribute('data-id') || generateId(),
+    name: card.querySelector('.certificate-name')?.value.trim() || '',
+    code: card.querySelector('.certificate-code')?.value.trim() || '',
+    issuer: card.querySelector('.certificate-issuer')?.value.trim() || '',
+    date: card.querySelector('.certificate-date')?.value.trim() || '',
+    expiryDate: card.querySelector('.certificate-expiry')?.value.trim() || ''
+  }));
+}
+
 function collectProfileUpdates() {
   return {
     basicInfo: {
@@ -1532,6 +1664,8 @@ function collectProfileUpdates() {
       ethnicity: document.getElementById('ethnicity')?.value.trim() || '',
       hometown: document.getElementById('hometown')?.value.trim() || '',
       graduationDate: document.getElementById('graduationDate')?.value.trim() || '',
+      maritalStatus: document.getElementById('maritalStatus')?.value || '',
+      currentCity: document.getElementById('currentCity')?.value.trim() || '',
       emergencyContact: document.getElementById('emergencyContact')?.value.trim() || '',
       emergencyRelation: document.getElementById('emergencyRelation')?.value.trim() || '',
       emergencyPhone: document.getElementById('emergencyPhone')?.value.trim() || '',
@@ -1550,7 +1684,9 @@ function collectProfileUpdates() {
       expectedPosition: document.getElementById('expectedPosition')?.value.trim() || '',
       expectedSalary: document.getElementById('expectedSalary')?.value.trim() || '',
       availableDate: document.getElementById('availableDate')?.value.trim() || '',
-      referralCode: document.getElementById('referralCode')?.value.trim() || ''
+      referralCode: document.getElementById('referralCode')?.value.trim() || '',
+      recruitSource: document.getElementById('recruitSource')?.value.trim() || '',
+      willingToTravel: document.getElementById('willingToTravel')?.value || ''
     },
     languageSkills: {
       cet4: document.getElementById('cet4')?.value.trim() || '',
@@ -1560,6 +1696,8 @@ function collectProfileUpdates() {
       otherLanguages: document.getElementById('otherLanguages')?.value.trim() || ''
     },
     awards: collectAwardsData(),
+    familyMembers: collectFamilyData(),
+    certificates: collectCertificatesData(),
     education: collectEducationData(),
     workExperience: collectWorkData(),
     projects: collectProjectData(),
@@ -1696,6 +1834,46 @@ async function deleteAward(awardId) {
   currentProfile.awards = collectAwardsData().filter((item) => item.id !== awardId);
   if (currentProfile.awards.length === 0) currentProfile.awards.push(emptyAward());
   renderAwardsList(currentProfile.awards);
+}
+
+function addFamilyMember() {
+  if (!currentProfile) return;
+  currentProfile.familyMembers = collectFamilyData();
+  currentProfile.familyMembers.push(emptyFamilyMember());
+  renderFamilyList(currentProfile.familyMembers);
+}
+
+async function deleteFamilyMember(memberId) {
+  const ok = await showAppleConfirm({
+    title: '删除家庭成员',
+    subtitle: '确定要删除这条家庭成员信息吗？',
+    confirmText: '确定删除',
+    isDanger: true
+  });
+  if (!ok) return;
+  currentProfile.familyMembers = collectFamilyData().filter((item) => item.id !== memberId);
+  if (!currentProfile.familyMembers.length) currentProfile.familyMembers.push(emptyFamilyMember());
+  renderFamilyList(currentProfile.familyMembers);
+}
+
+function addCertificate() {
+  if (!currentProfile) return;
+  currentProfile.certificates = collectCertificatesData();
+  currentProfile.certificates.push(emptyCertificate());
+  renderCertificatesList(currentProfile.certificates);
+}
+
+async function deleteCertificate(certificateId) {
+  const ok = await showAppleConfirm({
+    title: '删除资格证书',
+    subtitle: '确定要删除这条资格证书信息吗？',
+    confirmText: '确定删除',
+    isDanger: true
+  });
+  if (!ok) return;
+  currentProfile.certificates = collectCertificatesData().filter((item) => item.id !== certificateId);
+  if (!currentProfile.certificates.length) currentProfile.certificates.push(emptyCertificate());
+  renderCertificatesList(currentProfile.certificates);
 }
 
 function addSkill() {
@@ -1941,7 +2119,7 @@ function fillParsedData(data) {
   const bi = data.basicInfo || {};
   const basicFields = [
     'fullName', 'firstName', 'lastName', 'phone', 'email', 'gender',
-    'politicalStatus', 'ethnicity', 'hometown', 'graduationDate',
+    'politicalStatus', 'ethnicity', 'hometown', 'graduationDate', 'maritalStatus', 'currentCity',
     'emergencyContact', 'emergencyRelation', 'emergencyPhone',
     'city', 'state', 'country', 'zipCode', 'street',
     'linkedin', 'github', 'website', 'twitter'
@@ -1963,7 +2141,7 @@ function fillParsedData(data) {
   // 求职意向
   currentProfile.jobIntention = currentProfile.jobIntention || {};
   const ji = data.jobIntention || {};
-  ['expectedCity', 'expectedPosition', 'expectedSalary', 'availableDate', 'referralCode'].forEach(key => {
+  ['expectedCity', 'expectedPosition', 'expectedSalary', 'availableDate', 'referralCode', 'recruitSource', 'willingToTravel'].forEach(key => {
     if (ji[key]) {
       setInputValue(key, ji[key]);
       currentProfile.jobIntention[key] = ji[key];
@@ -1979,6 +2157,16 @@ function fillParsedData(data) {
       currentProfile.languageSkills[key] = ls[key];
     }
   });
+
+  if (data.familyMembers && data.familyMembers.length) {
+    currentProfile.familyMembers = data.familyMembers.map((item) => ({ ...emptyFamilyMember(), ...item, id: generateId() }));
+    renderFamilyList(currentProfile.familyMembers);
+  }
+
+  if (data.certificates && data.certificates.length) {
+    currentProfile.certificates = normalizeCertificates(data.certificates);
+    renderCertificatesList(currentProfile.certificates);
+  }
 
   // 荣誉奖项
   if (data.awards && data.awards.length) {
@@ -2675,7 +2863,7 @@ function initSidebarNav() {
     'section-parser',
     'section-basic',
     'section-intention',
-    'section-awards',
+    'section-family', 'section-certificates', 'section-awards',
     'section-education',
     'section-work',
     'section-projects',

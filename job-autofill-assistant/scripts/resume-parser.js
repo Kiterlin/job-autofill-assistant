@@ -834,6 +834,8 @@ JSON schema 规范：
     "ethnicity": "",
     "hometown": "",
     "graduationDate": "",
+    "maritalStatus": "",
+    "currentCity": "",
     "emergencyContact": "",
     "emergencyRelation": "",
     "emergencyPhone": "",
@@ -852,7 +854,9 @@ JSON schema 规范：
     "expectedPosition": "",
     "expectedSalary": "",
     "availableDate": "",
-    "referralCode": ""
+    "referralCode": "",
+    "recruitSource": "",
+    "willingToTravel": ""
   },
   "languageSkills": {
     "cet4": "",
@@ -861,11 +865,17 @@ JSON schema 规范：
     "toefl": "",
     "otherLanguages": ""
   },
+  "familyMembers": [
+    {"name":"","relation":"","employer":"","position":"","phone":""}
+  ],
   "awards": [
     {"name":"","level":"国家级/省部级/校级/院系级","date":""}
   ],
+  "certificates": [
+    {"name":"","code":"","issuer":"","date":"","expiryDate":""}
+  ],
   "education": [
-    {"school":"","college":"","major":"","degree":"大专/本科/硕士/博士","degreeType":"普通全日制统招/非全日制/海外留学生","startDate":"","endDate":"","gpa":"","rank":"","courses":""}
+    {"school":"","college":"","major":"","degree":"大专/本科/硕士/博士","degreeType":"普通全日制统招/非全日制/海外留学生","schoolType":"985/211/双一流/普通本科/专科","startDate":"","endDate":"","gpa":"","rank":"","courses":""}
   ],
   "workExperience": [
     {"company":"","department":"","position":"","workType":"实习/全职","city":"","startDate":"","endDate":"","description":"","achievements":""}
@@ -1011,6 +1021,8 @@ ${resumeText}`;
         ethnicity: str(bi.ethnicity),
         hometown: str(bi.hometown),
         graduationDate: str(bi.graduationDate),
+        maritalStatus: str(bi.maritalStatus),
+        currentCity: str(bi.currentCity),
         emergencyContact: str(bi.emergencyContact),
         emergencyRelation: str(bi.emergencyRelation),
         emergencyPhone: digitsPhone(bi.emergencyPhone),
@@ -1029,7 +1041,9 @@ ${resumeText}`;
         expectedPosition: str(ji.expectedPosition),
         expectedSalary: str(ji.expectedSalary),
         availableDate: str(ji.availableDate),
-        referralCode: str(ji.referralCode)
+        referralCode: str(ji.referralCode),
+        recruitSource: str(ji.recruitSource),
+        willingToTravel: str(ji.willingToTravel)
       },
       languageSkills: {
         cet4: str(ls.cet4),
@@ -1038,17 +1052,34 @@ ${resumeText}`;
         toefl: str(ls.toefl),
         otherLanguages: str(ls.otherLanguages)
       },
+      familyMembers: arr(data.familyMembers).map((member) => ({
+        name: str(member.name),
+        relation: str(member.relation),
+        employer: str(member.employer || member.company),
+        position: str(member.position),
+        phone: digitsPhone(member.phone)
+      })).filter((member) => member.name || member.relation),
       awards: arr(data.awards).map((a) => ({
         name: str(a.name || a.title),
         level: str(a.level),
         date: str(a.date || a.time)
       })).filter((a) => a.name),
+      certificates: arr(data.certificates).map((certificate) => typeof certificate === 'string' ? {
+        name: str(certificate), code: '', issuer: '', date: '', expiryDate: ''
+      } : {
+        name: str(certificate.name || certificate.title),
+        code: str(certificate.code || certificate.number),
+        issuer: str(certificate.issuer || certificate.organization),
+        date: str(certificate.date),
+        expiryDate: str(certificate.expiryDate || certificate.expiry)
+      }).filter((certificate) => certificate.name),
       education: arr(data.education).map((e) => ({
         school: str(e.school),
         college: str(e.college || e.department),
         major: str(e.major),
         degree: str(e.degree),
         degreeType: str(e.degreeType),
+        schoolType: str(e.schoolType),
         startDate: str(e.startDate || e.start),
         endDate: str(e.endDate || e.end),
         gpa: str(e.gpa),
