@@ -60,7 +60,7 @@ html, body {
   min-height: 480px;
   background: var(--bg);
   color: var(--text-main);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Segoe UI", "Noto Sans SC", sans-serif;
+  font-family: "App UI", Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 13px;
   line-height: 1.45;
   position: relative;

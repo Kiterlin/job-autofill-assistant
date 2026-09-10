@@ -1371,6 +1371,13 @@ function bindEvents() {
   document.getElementById('saveBtn').addEventListener('click', () => saveProfile());
   document.getElementById('saveBtn2').addEventListener('click', () => saveProfile());
   document.getElementById('sidebarSaveBtn')?.addEventListener('click', () => saveProfile());
+  document.getElementById('exportBackupBtn')?.addEventListener('click', exportBackup);
+  document.getElementById('importBackupBtn')?.addEventListener('click', () => document.getElementById('importBackupFile').click());
+  document.getElementById('importBackupFile')?.addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    await importBackup(file);
+  });
   document.getElementById('deleteProfileBtn').addEventListener('click', deleteCurrentProfile);
   document.getElementById('themeToggle')?.addEventListener('click', toggleTheme);
   initSidebarNav();
@@ -1827,6 +1834,43 @@ chrome.runtime.onMessage.addListener((request, _sender, respond) => {
     return true;
   }
 });
+
+async function exportBackup() {
+  try {
+    const response = await sendMessage({ action: 'exportData' });
+    if (!response?.success) throw new Error(response?.error || '请重试');
+    const blob = new Blob([response.data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `秋招助手备份_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    const count = Object.keys(JSON.parse(response.data).attachmentContents || {}).length;
+    showToast(count ? `资料已导出，含 ${count} 个附件` : '资料已导出（当前没有附件）', 'success');
+  } catch (error) {
+    showToast('导出失败：' + error.message, 'error');
+  }
+}
+
+async function importBackup(file) {
+  if (!file) return;
+  const ok = await showAppleConfirm({
+    title: '导入资料备份',
+    subtitle: '将替换当前全部资料、附件、设置和投递记录。导入失败会保留现有数据。',
+    confirmText: '确认导入',
+    isDanger: true
+  });
+  if (!ok) return;
+  try {
+    const data = await file.text();
+    const response = await sendMessage({ action: 'importData', data });
+    if (!response?.success) throw new Error(response?.error || '数据格式不匹配');
+    showToast('资料已导入', 'success');
+  } catch (error) {
+    showToast('导入失败：' + error.message, 'error');
+  }
+}
 
 async function persistProfile({ silent, profileId, updates, settings, revision }) {
   if (!profileId) {
@@ -3023,7 +3067,7 @@ function initTabNav() {
   };
 
   const navProfileGroup = document.getElementById('navProfileGroup');
-  const navSaveBtn = document.getElementById('saveBtn');
+  const navProfileActions = document.getElementById('navProfileActions');
   const navKanbanActions = document.getElementById('navKanbanActions');
   const sidebarDrawer = document.getElementById('sidebarDrawer');
 
@@ -3048,12 +3092,12 @@ function initTabNav() {
     // 切换顶栏控件和侧边栏
     if (tabKey === 'profile') {
       if (navProfileGroup) navProfileGroup.style.display = 'flex';
-      if (navSaveBtn) navSaveBtn.style.display = 'inline-flex';
+      if (navProfileActions) navProfileActions.style.display = 'flex';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'block';
     } else if (tabKey === 'kanban') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
-      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navProfileActions) navProfileActions.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'flex';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
       requestAnimationFrame(() => {
@@ -3062,7 +3106,7 @@ function initTabNav() {
       });
     } else if (tabKey === 'logs') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
-      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navProfileActions) navProfileActions.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
       requestAnimationFrame(() => {
@@ -3070,7 +3114,7 @@ function initTabNav() {
       });
     } else if (tabKey === 'help') {
       if (navProfileGroup) navProfileGroup.style.display = 'none';
-      if (navSaveBtn) navSaveBtn.style.display = 'none';
+      if (navProfileActions) navProfileActions.style.display = 'none';
       if (navKanbanActions) navKanbanActions.style.display = 'none';
       if (sidebarDrawer) sidebarDrawer.style.display = 'none';
     }

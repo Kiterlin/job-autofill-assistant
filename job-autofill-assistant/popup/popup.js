@@ -664,7 +664,8 @@ function exportData() {
       a.download = `秋招助手备份_${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      showToast('数据导出成功', 'success');
+      const count = Object.keys(JSON.parse(response.data).attachmentContents || {}).length;
+      showToast(count ? `数据已导出，含 ${count} 个附件` : '数据已导出（当前没有附件）', 'success');
     } else {
       showToast('导出失败：' + (response?.error || '请重试'), 'error');
     }

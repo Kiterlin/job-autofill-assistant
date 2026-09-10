@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>资料配置中心 - Capybara网申助手</title>
   <script src="../scripts/theme-init.js"></script>
+  <link rel="stylesheet" href="../fonts/app-ui.css">
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
@@ -89,14 +90,33 @@
           </button>
         </div>
 
-        <button id="saveBtn" class="btn-nav-primary">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-            <polyline points="17 21 17 13 7 13 7 21"></polyline>
-            <polyline points="7 3 7 8 15 8"></polyline>
-          </svg>
-          <span>保存修改</span>
-        </button>
+        <div class="nav-profile-actions" id="navProfileActions">
+          <button id="saveBtn" class="btn-nav-primary">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            <span>保存修改</span>
+          </button>
+          <button type="button" id="exportBackupBtn" class="btn-nav-primary">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>导出资料</span>
+          </button>
+          <button type="button" id="importBackupBtn" class="btn-nav-primary">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <span>导入资料</span>
+          </button>
+          <input type="file" id="importBackupFile" accept="application/json,.json" hidden>
+        </div>
 
         <!-- 投递看板顶栏操作按钮 (仅在「投递看板」视图显示) -->
         <div class="nav-kanban-actions" id="navKanbanActions" style="display: none;">
@@ -1236,7 +1256,7 @@
             </div>
             <div class="faq-item">
               <div class="faq-q">📌 Q3: 更换电脑或重装浏览器后，我的资料会丢失吗？</div>
-              <div class="faq-a">插件弹窗底部提供了「导出数据」按钮，点击即可将全部资料一键导出为 <code>.json</code> 备份文件；在新设备上点击「导入数据」即可秒速恢复所有资料与投递记录。</div>
+              <div class="faq-a">在配置页顶部「保存修改」右侧，或插件弹窗底部，点击「导出资料」，即可把全部资料、附件和投递记录保存为 <code>.json</code> 备份；在新设备上用「导入资料」恢复。</div>
             </div>
           </div>
         </section>

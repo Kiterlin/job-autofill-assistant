@@ -18,7 +18,7 @@ button, input, select, textarea {
 
 :root,
 [data-theme="light"] {
-  --font-ui: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  --font-ui: "App UI", Arial, "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --bg: #faf9f5;
   --bg-gradient: none;
   --nav-bg: rgba(250, 249, 245, 0.88);
@@ -409,6 +409,13 @@ body {
 [data-theme="dark"] .btn-nav-sub:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-main);
+}
+
+.nav-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .btn-nav-primary {
@@ -3809,7 +3816,7 @@ textarea {
   font-size: 13px;
 }
 
-/* 标题、目录共用图标笔触和无衬线字体。 */
+/* 标题、目录共用线性图标。 */
 #view-profile .section-icon {
   color: var(--text-secondary);
   background: var(--glass-card-nested);

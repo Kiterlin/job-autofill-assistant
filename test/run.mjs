@@ -149,6 +149,7 @@ const handledActions = new Set([...backgroundJs.matchAll(/case\s+'([^']+)'/g)].m
 handledActions.add('fillForm'); // content script（popup 经 tabs.sendMessage 直达页面）
 handledActions.add('toggleDock'); // 同上，content.js 处理悬浮窗开关
 handledActions.add('aiStepByStepFill'); // 同上，content.js 处理 AI 逐步填充
+handledActions.add('getEditorIdentity'); // 在 onMessage 入口直接回 documentId，供导出/导入前落盘
 const sentActions = new Set();
 for (const js of [optionsJs, popupJs, contentJs]) {
   for (const m of js.matchAll(/action:\s*'([^']+)'/g)) sentActions.add(m[1]);
