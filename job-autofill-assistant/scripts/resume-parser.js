@@ -836,7 +836,7 @@ class ResumeParser {
 扩展字段定义（与下面基础字段一并返回，各字段的中文含义如下）：
 ${JSON.stringify(profileSchema)}
 列表字段：${profileListKeys.join(", ")}；commonAnswers.programmingLanguages 是有序字符串数组。
-所有扩展字段只提取明确事实；degree 是学历，academicDegree 是学位，不互相推断。籍贯、生源地、户籍地分开；薪资单位不明留空，不换算。声明 answer 只可为空、是、否；涉及企业必须有适用企业及网站域名，否则留空。
+所有扩展字段只提取明确事实；degree 是学历，academicDegree 是学位，不互相推断。入团时间 leagueJoinDate 与入党时间 partyJoinDate 独立提取，仅写“入党团时间”且无法确定类型时两者留空，不能根据当前政治面貌判断。籍贯、生源地、户籍地分开；薪资单位不明留空，不换算。声明 answer 只可为空、是、否；涉及企业必须有适用企业及网站域名，否则留空。
 
 扩展字段应合并到同名对象或列表条目中；新增列表的每条记录使用对应字段定义，commonAnswers 为对象。下面字符串均为空值模板，不能把字段含义或可选值写入结果。没有记录的列表必须返回 []，不能返回全空的占位条目。
 

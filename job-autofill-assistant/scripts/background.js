@@ -15,14 +15,42 @@ storageReady.then(() => {
   console.log('[秋招助手] 存储初始化完成');
 });
 
-// 监听消息
+// 数据操作串行执行；导出/导入先等待编辑页保存，避免与队列互相等待。
 let dataMessageQueue = Promise.resolve();
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (['aiGenerate', 'parseResume'].includes(request.action)) return dispatchMessage(request, sender, sendResponse);
+function queueDataMessage(request, sender) {
   dataMessageQueue = dataMessageQueue.catch(() => {}).then(() => storageReady).then(() => new Promise(resolve => {
-    dispatchMessage(request, sender, response => { sendResponse(response); resolve(); });
+    dispatchMessage(request, sender, resolve);
   }));
-  dataMessageQueue.catch(error => sendResponse({ success: false, error: error.message }));
+  return dataMessageQueue;
+}
+
+async function handleBackupMessage(request, sender) {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['TAB'] });
+  const editors = contexts.filter(context => context.documentUrl?.split('#')[0] === chrome.runtime.getURL('options/options.html'));
+  let result;
+  try {
+    for (const editor of editors) {
+      const response = await chrome.runtime.sendMessage({ action: 'flushProfileEditor', documentId: editor.documentId, importing: request.action === 'importData' });
+      if (!response?.success) throw new Error(response?.error || '资料编辑页保存未完成，请保存后重试');
+    }
+    result = await queueDataMessage(request, sender);
+    return result;
+  } finally {
+    if (request.action === 'importData') {
+      await Promise.allSettled(editors.map(editor => chrome.runtime.sendMessage({
+        action: 'finishProfileImport', documentId: editor.documentId, success: !!result?.success
+      })));
+    }
+  }
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (['flushProfileEditor', 'finishProfileImport'].includes(request.action)) return false;
+  if (request.action === 'getEditorIdentity') { sendResponse({ documentId: sender.documentId }); return false; }
+  if (['aiGenerate', 'parseResume'].includes(request.action)) return dispatchMessage(request, sender, sendResponse);
+  const result = ['exportData', 'importData'].includes(request.action)
+    ? handleBackupMessage(request, sender) : queueDataMessage(request, sender);
+  result.then(sendResponse).catch(error => sendResponse({ success: false, error: error.message }));
   return true;
 });
 

@@ -710,6 +710,74 @@ try {
   ok('PDF 多页直接视觉提取与姓名不推断');
 } catch (error) { fail('PDF 视觉与提取约束', error.stack); }
 
+try {
+  const p = loadScript('scripts/resume-parser.js').resumeParser;
+  const sm = loadScript('scripts/storage.js').storageManager;
+  const old = sm.normalizeProfile({ basicInfo: { politicalJoinDate: '2016-09' } });
+  if (old.basicInfo.politicalJoinDate !== '2016-09' || old.basicInfo.leagueJoinDate || old.basicInfo.partyJoinDate) throw Error('旧日期丢失或被自动归类');
+  const parsed = p.validateAndCleanData({ basicInfo: { leagueJoinDate: '2016-09', partyJoinDate: '2022-06-15' } });
+  if (parsed.basicInfo.leagueJoinDate !== '2016-09' || parsed.basicInfo.partyJoinDate !== '2022-06-15') throw Error('独立日期或精度丢失');
+  const saved = sm.normalizeProfile({ ...old, basicInfo: { ...old.basicInfo, ...parsed.basicInfo } });
+  if (saved.basicInfo.politicalJoinDate !== '2016-09' || saved.basicInfo.leagueJoinDate !== '2016-09' || saved.basicInfo.partyJoinDate !== '2022-06-15') throw Error('新旧日期未独立保留');
+  ok('入团与入党日期独立保存，旧合并日期不推断');
+} catch (error) { fail('政治身份日期拆分', error.stack); }
+
+try {
+  const ctx = loadScript('scripts/storage.js');
+  const sm = ctx.storageManager;
+  const files = new Map();
+  ctx.attachmentStore.put = async file => { files.set(file.id, file); };
+  ctx.attachmentStore.get = async id => files.get(id);
+  ctx.attachmentStore.remove = async id => { files.delete(id); };
+  await sm.initialize();
+  const data = await sm.loadAll();
+  const profile = data.profiles[0];
+  function fill(value, prefix = '') {
+    if (Array.isArray(value)) return value.map((v, i) => fill(v, `${prefix}${i}`));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k,
+      ['id', 'createdAt', 'updatedAt'].includes(k) ? v : fill(v, `${prefix}.${k}`)]));
+    return typeof value === 'string' ? `测试${prefix}` : value;
+  }
+  Object.assign(profile, fill(profile));
+  profile.attachments = { resume: null, idPhoto: null, lifePhoto: null, works: [] };
+  Object.assign(profile.basicInfo, { birthDate: '2000-02-29', leagueJoinDate: '2016-09', partyJoinDate: '2022-06-15', politicalJoinDate: '旧日期', extraLegacy: '原字段' });
+  for (const key of ['papers', 'patents', 'openSource', 'customAnswers', 'declarations']) profile[key] = [{ id: `record-${key}`, name: `测试-${key}`, date: '2024-09', extraLegacy: '保留' }];
+  profile.commonAnswers.programmingLanguages = ['JS', 'Python'];
+  profile.introTemplates.custom = [{ name: '自定义模板', content: '保留内容' }];
+  profile.skills = ['测试技能'];
+  data.profiles.push({ ...structuredClone(profile), id: 'second-profile', name: '第二份资料' });
+  data.settings.extraSetting = '保留';
+  data.submissions = [{ id: 'submission', company: '测试企业' }];
+  data.logs = [{ id: 'log', message: '测试日志' }];
+  await sm.saveAll(data);
+  for (const [kind, name, type] of [['resume', 'resume.txt', 'text/plain'], ['idPhoto', 'id.png', 'image/png'], ['lifePhoto', 'life.png', 'image/png'], ['works', 'work1.txt', 'text/plain'], ['works', 'work2.txt', 'text/plain']]) {
+    await sm.saveAttachment(profile.id, kind, { name, type, size: 3, dataUrl: `data:${type};base64,YWJj` });
+  }
+  const backup = await sm.exportData();
+  await sm.importData(backup);
+  const restored = await sm.exportData();
+  function canonical(json) {
+    const data = JSON.parse(json);
+    const contents = data.attachmentContents;
+    delete data.attachmentContents; delete data.updatedAt;
+    for (const p of data.profiles) {
+      for (const ref of [p.attachments.resume, p.attachments.idPhoto, p.attachments.lifePhoto, ...p.attachments.works].filter(Boolean)) {
+        ref.dataUrl = contents[ref.id].dataUrl; delete ref.id;
+      }
+    }
+    return JSON.stringify(data);
+  }
+  if (canonical(backup) !== canonical(restored)) throw Error('资料/设置/记录/模板/附件内容往返不一致');
+  const beforeFailure = canonical(restored);
+  const save = sm.saveAll.bind(sm);
+  sm.saveAll = async () => { throw Error('模拟导入最后写入失败'); };
+  let rejected = false;
+  try { await sm.importData(backup); } catch { rejected = true; }
+  sm.saveAll = save;
+  if (!rejected || canonical(await sm.exportData()) !== beforeFailure) throw Error('导入写入失败损坏旧数据');
+  ok('完整备份往返保留多资料、全部字段、模板、设置、投递记录及五份附件，失败不覆盖');
+} catch (error) { fail('完整备份往返', error.stack); }
+
 section('汇总');
 const passed = results.filter((r) => r.pass).length;
 console.log(`\n${passed}/${results.length} 通过, ${failed} 失败`);

@@ -2745,7 +2745,7 @@
       patents: { '专利名称':'name', '名称':'name', '专利人':'inventor', '取得日期':'date', '获得时间':'date', '说明':'description', '链接':'url' },
       certificates: { '证书名称':'name', '证书编号':'code', '颁发机构':'issuer', '取得日期':'date', '有效期至':'expiryDate', '获得时间':'date' }
     };
-    const basic = { '国籍':'nationality', '生源地':'sourcePlace', '生源地(高考时户口所在地)':'sourcePlace', '户籍地':'registeredAddress', '户籍所在地':'registeredAddress', '入党团时间':'politicalJoinDate', '加入党派时间':'politicalJoinDate', '身高':'height', '身高(cm)':'height', '身高（cm）':'height', '体重':'weight', '体重(公斤)':'weight', '体重（kg）':'weight', '健康状况':'health' };
+    const basic = { '国籍':'nationality', '生源地':'sourcePlace', '生源地(高考时户口所在地)':'sourcePlace', '户籍地':'registeredAddress', '户籍所在地':'registeredAddress', '入党团时间':'politicalJoinDate', '入团时间':'leagueJoinDate', '入团日期':'leagueJoinDate', '加入共青团时间':'leagueJoinDate', '入党时间':'partyJoinDate', '入党日期':'partyJoinDate', '加入中国共产党时间':'partyJoinDate', '身高':'height', '身高(cm)':'height', '身高（cm）':'height', '体重':'weight', '体重(公斤)':'weight', '体重（kg）':'weight', '健康状况':'health' };
     const job = { '是否服从调剂':'acceptAdjustment', '是否接受县级公司工作':'acceptCounty', '是否愿意去县级公司工作':'acceptCounty', '币种':'salaryCurrency', '薪资币种':'salaryCurrency', '金额单位':'salaryUnit', '薪资周期':'salaryPeriod' };
     const answers = { '游戏经历':'gameExperience', '编程语言':'programmingLanguages', '请列出你最擅长的3门编程语言，并按熟悉程度从高到低排序。':'programmingLanguages', 'ai工具使用经历':'aiTools', 'ai 工具使用经历':'aiTools', '爱好特长':'hobbies', '爱好及特长':'hobbies', '优势不足':'strengthsWeaknesses', '优势与不足':'strengthsWeaknesses', '自我评价':'selfEvaluation', '求职目标':'careerGoal' };
     let count = 0;

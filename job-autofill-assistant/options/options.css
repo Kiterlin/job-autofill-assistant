@@ -3975,3 +3975,63 @@ textarea {
   .attachment-empty { padding-right: 0; }
   #view-profile .attachment-upload { grid-row: auto; justify-self: start; }
 }
+
+/* 下拉展开时允许菜单越过卡片边界，并覆盖后续章节。 */
+.glass:has(.apple-custom-select-box.is-open) {
+  overflow: visible;
+  z-index: 20;
+}
+:is(.sub-card, .item-card):has(.apple-custom-select-box.is-open) {
+  position: relative;
+  z-index: 2;
+}
+.apple-custom-select-box.is-open { z-index: 3; }
+
+/* 奖项以短字段为主，压缩留白并将补充说明与链接并排。 */
+#view-profile #awardsList .form-group { margin-bottom: 12px; gap: 6px; }
+#view-profile #awardsList .extended-fields { margin-top: 0; }
+#view-profile #awardsList .extended-fields .field-wide { grid-column: span 2; }
+#view-profile #awardsList textarea { min-height: 64px; height: 64px; padding-block: 9px; }
+#view-profile #awardsList .item-card-header { min-height: 44px; padding-block: 10px; margin-bottom: 14px; }
+#view-profile #awardsList .form-group > label { min-height: 20px; }
+@media (max-width: 1200px) {
+  #view-profile #awardsList .extended-fields .field-wide { grid-column: 1 / -1; }
+}
+
+/* 按内容组织短字段，重复条目使用更紧凑的间距。 */
+#view-profile .item-card .form-group { margin-bottom: 14px; gap: 6px; }
+#view-profile .item-card .extended-fields { margin-top: 0; }
+#view-profile .item-card-header { min-height: 46px; padding-block: 11px; margin-bottom: 16px; }
+#view-profile .item-card textarea,
+#view-profile #section-commonAnswers textarea {
+  field-sizing: content;
+  height: auto;
+  min-height: 72px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+#view-profile .project-link-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+#view-profile [data-field-section="basicInfo"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#view-profile [data-field-section="basicInfo"] > .form-group { grid-column: auto; }
+#view-profile [data-field-section="jobIntention"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+#view-profile [data-field-section="jobIntention"] > .form-group { grid-column: span 2; }
+#view-profile [data-field-section="jobIntention"] > :is([data-field="acceptAdjustment"], [data-field="acceptCounty"]) { grid-column: span 3; }
+#view-profile [data-field-section="patents"] > [data-field="description"] { grid-column: span 2; }
+#view-profile [data-field-section="customAnswers"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#view-profile [data-field-section="customAnswers"] > .field-wide { grid-column: auto; }
+#view-profile #section-commonAnswers [data-field="careerGoal"] { grid-column: 1 / -1; }
+#view-profile [data-field-section="openSource"] { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
+@media (min-width: 761px) and (max-width: 1200px) {
+  #view-profile [data-field-section="basicInfo"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #view-profile .extended-fields[data-field-section="basicInfo"] > .form-group { grid-column: auto; }
+  #view-profile [data-field-section="patents"] > [data-field="description"] { grid-column: 1 / -1; }
+  #view-profile [data-field-section="openSource"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #view-profile [data-field-section="openSource"] > [data-field="url"] { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  #view-profile .project-link-row,
+  #view-profile [data-field-section] { grid-template-columns: minmax(0, 1fr); }
+  #view-profile .extended-fields[data-field-section] > .form-group { grid-column: 1 / -1; }
+}
+
+.legacy-political-date { grid-column: 1 / -1; margin-bottom: 14px; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }

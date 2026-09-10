@@ -10,6 +10,12 @@ let aiUrlSaveTimer = null;
 let aiModelSaveTimer = null;
 let ocrSaveTimer = null;
 let profileSaveTimer = null;
+let profileDirty = false;
+let profileEditRevision = 0;
+let pendingProfileSave = Promise.resolve(true);
+let editorDocumentId = null;
+let savedAiSettingsFingerprint = null;
+let pendingSettingsSave = Promise.resolve(true);
 let modelFetchSeq = 0;
 let selectedAiResumeFile = null;
 // 每次解析/取消都递增；旧解析完成后发现序号变了就丢弃结果，防止过期数据写入表单
@@ -22,11 +28,15 @@ function cancelOngoingAiParse() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   // 1. 并发并行获取设置、简历资料与投递记录，彻底消除多重 IPC 串行往返延迟
-  const [settingsRes, profilesRes, submissionsRes] = await Promise.all([
+  const [settingsRes, profilesRes, submissionsRes, editorRes] = await Promise.all([
     sendMessage({ action: 'getSettings' }).catch(() => ({})),
     sendMessage({ action: 'getAllProfiles' }).catch(() => ({})),
-    sendMessage({ action: 'getSubmissions' }).catch(() => ({}))
+    sendMessage({ action: 'getSubmissions' }).catch(() => ({})),
+    sendMessage({ action: 'getEditorIdentity' }).catch(() => ({}))
   ]);
+
+  editorDocumentId = editorRes.documentId;
+  initBirthDatePicker();
 
   // 2. 极速应用主题
   applyThemeFromSettings(settingsRes);
@@ -57,13 +67,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 4. 应用 AI 与 OCR 配置
   applyAiSettings(settingsRes);
+  savedAiSettingsFingerprint = JSON.stringify(collectAiSettingsFromDom());
 
   // 5. 应用投递历史数据
   allSubmissions = submissionsRes && submissionsRes.success && Array.isArray(submissionsRes.submissions) ? submissionsRes.submissions : [];
   updateSubmissionStats();
 
   // 6. 初始化出生日期选择器与所有 Apple Select 控件 (单次统一转换)
-  initBirthDatePicker();
   initAllAppleSelects();
 
   // 7. 绑定事件与导航
@@ -369,10 +379,19 @@ async function refreshModelList({ silent = false } = {}) {
   }
 }
 
+function setFieldValue(el, value) {
+  const text = value == null ? '' : String(value);
+  if (el.tagName === 'SELECT' && text && ![...el.options].some(option => option.value === text)) {
+    el.add(new Option(text, text));
+  }
+  el.value = text;
+  el._refreshAppleSelect?.();
+}
+
 function setInputValue(id, value) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.value = value == null ? '' : value;
+  setFieldValue(el, value);
   if (id === 'birthDate') {
     syncBirthDatePickerFromValue(el.value);
   }
@@ -401,11 +420,10 @@ function initBirthDatePicker() {
   const hiddenDate = document.getElementById('birthDate');
   if (!yearSelect || !monthSelect || !daySelect || !hiddenDate) return;
 
-  // 填充年份 (从 2012 倒序到 1960，最常选的 1995~2005 触手可及)
+  // 日期选项先初始化，再回填资料，避免清空已保存的出生日期。
   yearSelect.innerHTML = '<option value="">年份</option>';
   const currentYear = new Date().getFullYear();
-  const maxYear = currentYear - 12; // 约 2014
-  for (let y = maxYear; y >= 1960; y--) {
+  for (let y = currentYear; y >= 1900; y--) {
     const opt = document.createElement('option');
     opt.value = String(y);
     opt.textContent = `${y}年`;
@@ -512,7 +530,13 @@ function syncBirthDatePickerFromValue(val) {
     return;
   }
 
+  yearSelect.value = '';
+  monthSelect.value = '';
+  daySelect.value = '';
   const parts = str.split(/[-/.\s年日月]/).filter(Boolean);
+  if (/^\d{4}$/.test(parts[0]) && ![...yearSelect.options].some(option => option.value === parts[0])) {
+    yearSelect.add(new Option(`${parts[0]}年`, parts[0]));
+  }
   if (parts.length >= 1) {
     const y = parts[0];
     if (yearSelect.querySelector(`option[value="${y}"]`)) {
@@ -858,6 +882,7 @@ async function loadAISettings() {
   if (settings.aiApiKey && settings.aiEnabled) {
     refreshModelList({ silent: true });
   }
+  savedAiSettingsFingerprint = JSON.stringify(collectAiSettingsFromDom());
 }
 
 function loadProfileToForm(profile) {
@@ -868,7 +893,7 @@ function loadProfileToForm(profile) {
   setInputValue('phone', info.phone);
   setInputValue('email', info.email);
   setInputValue('gender', info.gender);
-  setInputValue('birthDate', toDateInput(info.birthDate));
+  setInputValue('birthDate', toDateInput(info.birthDate) || info.birthDate || '');
   setInputValue('idCard', info.idCard);
   setInputValue('politicalStatus', info.politicalStatus);
   setInputValue('ethnicity', info.ethnicity);
@@ -908,13 +933,13 @@ function loadProfileToForm(profile) {
   setInputValue('otherLanguages', lang.otherLanguages);
 
   // 动态列表
-  renderEducationList(profile.education && profile.education.length ? profile.education : [emptyEducation()]);
-  renderWorkList(profile.workExperience && profile.workExperience.length ? profile.workExperience : [emptyWork()]);
-  renderProjectList(profile.projects && profile.projects.length ? profile.projects : [emptyProject()]);
-  renderAwardsList(profile.awards && profile.awards.length ? profile.awards : [emptyAward()]);
-  renderFamilyList(profile.familyMembers && profile.familyMembers.length ? profile.familyMembers : [emptyFamilyMember()]);
+  renderEducationList(profile.education || []);
+  renderWorkList(profile.workExperience || []);
+  renderProjectList(profile.projects || []);
+  renderAwardsList(profile.awards || []);
+  renderFamilyList(profile.familyMembers || []);
   const certificates = normalizeCertificates(profile.certificates);
-  renderCertificatesList(certificates.length ? certificates : [emptyCertificate()]);
+  renderCertificatesList(certificates);
   renderSkillsList(profile.skills || []);
 
   document.getElementById('introduction').value = profile.introTemplates?.default || '';
@@ -1027,6 +1052,9 @@ function renderEducationList(educationList) {
         <textarea class="edu-description" rows="3" placeholder="在校职务、荣誉、论文及其他补充信息">${html(edu.description)}</textarea>
       </div>
     `;
+    setFieldValue(card.querySelector('.edu-degree'), edu.degree);
+    setFieldValue(card.querySelector('.edu-degree-type'), edu.degreeType);
+    setFieldValue(card.querySelector('.edu-school-type'), edu.schoolType);
     appendExtendedFields(card, 'education', edu);
     container.appendChild(card);
   });
@@ -1099,6 +1127,7 @@ function renderWorkList(workList) {
         <textarea class="work-achievements" rows="2" placeholder="例如: 优化首屏加载耗时 35%，主导模块上线支撑日活 500 万+ 用户">${html(work.achievements)}</textarea>
       </div>
     `;
+    setFieldValue(card.querySelector('.work-type'), work.workType);
     container.appendChild(card);
   });
 
@@ -1176,7 +1205,14 @@ function renderProjectList(projectList) {
         <textarea class="proj-achieve" rows="2" placeholder="例如: 荣获全国大学生计算机设计大赛一等奖，系统上线稳定支撑 10w+ 用户访问">${html(project.achievements)}</textarea>
       </div>
     `;
+    setFieldValue(card.querySelector('.proj-type'), project.projectType);
     appendExtendedFields(card, 'projects', project);
+    const projectLink = card.querySelector('.proj-url').closest('.form-group');
+    const projectRow = document.createElement('div');
+    projectRow.className = 'form-row project-link-row';
+    projectLink.before(projectRow);
+    projectRow.append(projectLink, card.querySelector('[data-field="projectLevel"]'));
+    card.querySelector('.extended-fields').remove();
     container.appendChild(card);
   });
 
@@ -1225,6 +1261,7 @@ function renderAwardsList(awardsList) {
         </div>
       </div>
     `;
+    setFieldValue(card.querySelector('.award-level'), award.level);
     appendExtendedFields(card, 'awards', award);
     container.appendChild(card);
   });
@@ -1258,6 +1295,10 @@ function renderFamilyList(members) {
         <div class="form-group"><label>职务</label><input type="text" class="family-position" value="${attr(member.position)}"></div>
       </div>`;
     appendExtendedFields(card, 'familyMembers', member);
+    const familyRow = card.querySelector('.family-employer').closest('.form-row');
+    familyRow.classList.add('form-row-3');
+    familyRow.append(card.querySelector('[data-field="birthDate"]'));
+    card.querySelector('.extended-fields').remove();
     container.appendChild(card);
   });
   container.querySelectorAll('.btn-delete[data-type="family"]').forEach((btn) => {
@@ -1493,12 +1534,18 @@ function bindEvents() {
   document.getElementById('testOcrBtn')?.addEventListener('click', testOcrConnection);
 
   document.getElementById('ocrApiKey').addEventListener('input', scheduleOcrSettingsSave);
-  document.addEventListener('input', event => { if (event.target.matches('[data-ext-key]')) debouncedSave(); });
-  document.addEventListener('change', event => { if (event.target.matches('select[data-ext-key]')) debouncedSave(); });
+  for (const eventName of ['input', 'change']) {
+    document.getElementById('view-profile').addEventListener(eventName, event => {
+      const input = event.target;
+      if (!input.matches('input,select,textarea') || input.type === 'file' || input.id === 'skillInput' || input.closest('#section-ai,#section-parser')) return;
+      debouncedSave();
+    });
+  }
+  window.addEventListener('blur', () => { if (profileDirty) flushProfileSave(); });
 }
 
 async function switchProfile(profileId) {
-  clearTimeout(profileSaveTimer);
+  if (!await flushProfileSave()) return;
   const response = await sendMessage({ action: 'setActiveProfile', profileId });
   if (response.success) {
     clearSelectedAiResumeFile();
@@ -1516,6 +1563,7 @@ async function addNewProfile() {
     confirmText: '创建资料'
   });
   if (!name || !name.trim()) return;
+  if (!await flushProfileSave()) return;
   const response = await sendMessage({ action: 'addProfile', name: name.trim() });
   if (response.success) {
     clearSelectedAiResumeFile();
@@ -1618,7 +1666,6 @@ function collectProjectData() {
       role: card.querySelector('.proj-role').value.trim(),
       projectType: card.querySelector('.proj-type')?.value || '',
       techStack: tech,
-      technologies: tech ? tech.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : [],
       startDate: card.querySelector('.proj-start')?.value.trim() || '',
       endDate: card.querySelector('.proj-end')?.value.trim() || '',
       projectUrl: card.querySelector('.proj-url')?.value.trim() || '',
@@ -1732,6 +1779,8 @@ function collectProfileUpdates() {
 }
 
 function debouncedSave() {
+  profileDirty = true;
+  profileEditRevision++;
   clearTimeout(profileSaveTimer);
   profileSaveTimer = setTimeout(() => {
     saveProfile({ silent: true }).catch((error) => {
@@ -1740,38 +1789,76 @@ function debouncedSave() {
   }, 600);
 }
 
-async function saveProfile({ silent = false } = {}) {
-  if (!activeProfileId) {
+function saveProfile({ silent = false } = {}) {
+  clearTimeout(profileSaveTimer);
+  const settings = collectAiSettingsFromDom();
+  const snapshot = { silent, profileId: activeProfileId, updates: structuredClone(collectProfileUpdates()),
+    settings: JSON.stringify(settings) === savedAiSettingsFingerprint ? null : settings, revision: profileEditRevision };
+  pendingProfileSave = pendingProfileSave.catch(() => false).then(() => persistProfile(snapshot));
+  return pendingProfileSave;
+}
+
+async function flushProfileSave() {
+  clearTimeout(profileSaveTimer);
+  for (const timer of [aiKeySaveTimer, aiUrlSaveTimer, aiModelSaveTimer, ocrSaveTimer]) clearTimeout(timer);
+  modelFetchSeq++;
+  const profileSaved = await (profileDirty ? saveProfile({ silent: true }) : pendingProfileSave);
+  const settingsSaved = JSON.stringify(collectAiSettingsFromDom()) !== savedAiSettingsFingerprint
+    ? await autoSaveAiSettings() : await pendingSettingsSave;
+  return profileSaved && settingsSaved;
+}
+
+// 备份前由 background 定向请求各编辑页落盘；导入期间暂停编辑与定时保存。
+chrome.runtime.onMessage.addListener((request, _sender, respond) => {
+  if (!editorDocumentId || request.documentId !== editorDocumentId) return;
+  if (request.action === 'flushProfileEditor') {
+    if (request.importing) document.body.inert = true;
+    flushProfileSave().then(success => respond({ success })).catch(error => respond({ success: false, error: error.message }));
+    return true;
+  }
+  if (request.action === 'finishProfileImport') {
+    clearTimeout(profileSaveTimer);
+    (async () => {
+      try {
+        if (request.success) { profileDirty = false; cancelOngoingAiParse(); await loadProfiles(); }
+        respond({ success: true });
+      } finally { document.body.inert = false; }
+    })().catch(error => respond({ success: false, error: error.message }));
+    return true;
+  }
+});
+
+async function persistProfile({ silent, profileId, updates, settings, revision }) {
+  if (!profileId) {
     if (!silent) showToast('没有可保存的资料', 'error');
     return false;
   }
 
-  const updates = collectProfileUpdates();
-  const settings = collectAiSettingsFromDom();
 
   try {
     const response1 = await sendMessage({
       action: 'updateProfile',
-      profileId: activeProfileId,
+      profileId,
       updates
     });
-    const response2 = await sendMessage({
-      action: 'updateSettings',
-      settings
-    });
+    const response2 = settings ? await sendMessage({ action: 'updateSettings', settings }) : { success: true };
+    if (settings && response2.success) savedAiSettingsFingerprint = JSON.stringify(settings);
 
     if (response1.success && response2.success) {
-      currentProfile = mergeProfile(currentProfile || {}, { ...updates, id: activeProfileId });
+      if (profileId === activeProfileId) {
+        currentProfile = mergeProfile(currentProfile || {}, { ...updates, id: profileId });
+        if (revision === profileEditRevision) profileDirty = false;
+      }
       if (typeof appLog !== 'undefined') appLog.success('options', 'profile.save', silent ? '资料已静默保存' : '资料已保存');
       if (!silent) showToast('资料与设置已保存', 'success');
       return true;
     }
 
-    if (!silent) showToast('保存失败', 'error');
+    showToast(response1.error || response2.error || '保存失败，请重试', 'error');
     return false;
   } catch (error) {
     console.error('[保存] 失败:', error);
-    if (!silent) showToast('保存失败: ' + error.message, 'error');
+    showToast('保存失败: ' + error.message, 'error');
     return false;
   }
 }
@@ -1781,6 +1868,7 @@ function addEducation() {
   currentProfile.education = collectEducationData();
   currentProfile.education.push(emptyEducation());
   renderEducationList(currentProfile.education);
+  debouncedSave();
 }
 
 async function deleteEducation(eduId) {
@@ -1794,6 +1882,7 @@ async function deleteEducation(eduId) {
   currentProfile.education = collectEducationData().filter((item) => item.id !== eduId);
   if (currentProfile.education.length === 0) currentProfile.education.push(emptyEducation());
   renderEducationList(currentProfile.education);
+  debouncedSave();
 }
 
 function addWorkExperience() {
@@ -1801,6 +1890,7 @@ function addWorkExperience() {
   currentProfile.workExperience = collectWorkData();
   currentProfile.workExperience.push(emptyWork());
   renderWorkList(currentProfile.workExperience);
+  debouncedSave();
 }
 
 async function deleteWorkExperience(workId) {
@@ -1814,6 +1904,7 @@ async function deleteWorkExperience(workId) {
   currentProfile.workExperience = collectWorkData().filter((item) => item.id !== workId);
   if (currentProfile.workExperience.length === 0) currentProfile.workExperience.push(emptyWork());
   renderWorkList(currentProfile.workExperience);
+  debouncedSave();
 }
 
 function addProject() {
@@ -1821,6 +1912,7 @@ function addProject() {
   currentProfile.projects = collectProjectData();
   currentProfile.projects.push(emptyProject());
   renderProjectList(currentProfile.projects);
+  debouncedSave();
 }
 
 async function deleteProject(projectId) {
@@ -1834,6 +1926,7 @@ async function deleteProject(projectId) {
   currentProfile.projects = collectProjectData().filter((item) => item.id !== projectId);
   if (currentProfile.projects.length === 0) currentProfile.projects.push(emptyProject());
   renderProjectList(currentProfile.projects);
+  debouncedSave();
 }
 
 function addAward() {
@@ -1841,6 +1934,7 @@ function addAward() {
   currentProfile.awards = collectAwardsData();
   currentProfile.awards.push(emptyAward());
   renderAwardsList(currentProfile.awards);
+  debouncedSave();
 }
 
 async function deleteAward(awardId) {
@@ -1854,6 +1948,7 @@ async function deleteAward(awardId) {
   currentProfile.awards = collectAwardsData().filter((item) => item.id !== awardId);
   if (currentProfile.awards.length === 0) currentProfile.awards.push(emptyAward());
   renderAwardsList(currentProfile.awards);
+  debouncedSave();
 }
 
 function addFamilyMember() {
@@ -1861,6 +1956,7 @@ function addFamilyMember() {
   currentProfile.familyMembers = collectFamilyData();
   currentProfile.familyMembers.push(emptyFamilyMember());
   renderFamilyList(currentProfile.familyMembers);
+  debouncedSave();
 }
 
 async function deleteFamilyMember(memberId) {
@@ -1874,6 +1970,7 @@ async function deleteFamilyMember(memberId) {
   currentProfile.familyMembers = collectFamilyData().filter((item) => item.id !== memberId);
   if (!currentProfile.familyMembers.length) currentProfile.familyMembers.push(emptyFamilyMember());
   renderFamilyList(currentProfile.familyMembers);
+  debouncedSave();
 }
 
 function addCertificate() {
@@ -1881,6 +1978,7 @@ function addCertificate() {
   currentProfile.certificates = collectCertificatesData();
   currentProfile.certificates.push(emptyCertificate());
   renderCertificatesList(currentProfile.certificates);
+  debouncedSave();
 }
 
 async function deleteCertificate(certificateId) {
@@ -1894,6 +1992,7 @@ async function deleteCertificate(certificateId) {
   currentProfile.certificates = collectCertificatesData().filter((item) => item.id !== certificateId);
   if (!currentProfile.certificates.length) currentProfile.certificates.push(emptyCertificate());
   renderCertificatesList(currentProfile.certificates);
+  debouncedSave();
 }
 
 function addSkill() {
@@ -1904,6 +2003,7 @@ function addSkill() {
   if (!currentProfile.skills.includes(skill)) {
     currentProfile.skills.push(skill);
     renderSkillsList(currentProfile.skills);
+  debouncedSave();
   }
   input.value = '';
 }
@@ -1911,6 +2011,7 @@ function addSkill() {
 function removeSkill(skill) {
   currentProfile.skills = (currentProfile.skills || []).filter((item) => item !== skill);
   renderSkillsList(currentProfile.skills);
+  debouncedSave();
 }
 
 function loadIntroductionTemplate(type) {
@@ -1920,6 +2021,7 @@ function loadIntroductionTemplate(type) {
     ops: '对互联网运营充满热情，具备优秀的用户增长意识、内容策划能力与数据复盘能力，具备极强的执行力与自驱力...'
   };
   document.getElementById('introduction').value = templates[type] || '';
+  debouncedSave();
 }
 
 function updateResumeAttachmentUI(fileName, fileSize = 0) {
@@ -2146,7 +2248,7 @@ function fillParsedData(data) {
   if (bi.birthDate) {
     const birth = toDateInput(bi.birthDate);
     if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(birth)) {
-      document.getElementById('birthDate').value = birth;
+      setInputValue('birthDate', birth);
       currentProfile.basicInfo.birthDate = birth;
     }
   }
@@ -2250,16 +2352,19 @@ async function deleteCurrentProfile() {
   }
 }
 
-async function autoSaveAiSettings() {
+function autoSaveAiSettings() {
   const settings = collectAiSettingsFromDom();
-  console.log('[AI设置] 自动保存:', settings.aiProvider, settings.aiEnabled);
-  try {
-    const response = await sendMessage({ action: 'updateSettings', settings });
-    return !!(response && response.success);
-  } catch (error) {
-    console.error('[AI设置] 自动保存失败:', error);
-    return false;
-  }
+  pendingSettingsSave = pendingSettingsSave.catch(() => false).then(async () => {
+    try {
+      const response = await sendMessage({ action: 'updateSettings', settings });
+      if (response?.success) savedAiSettingsFingerprint = JSON.stringify(settings);
+      return !!response?.success;
+    } catch (error) {
+      console.error('[AI设置] 自动保存失败:', error);
+      return false;
+    }
+  });
+  return pendingSettingsSave;
 }
 
 async function testAiConnection() {
@@ -3089,9 +3194,20 @@ async function exportLogs() {
 function appendExtendedFields(root, section, values = {}) {
   const grid = document.createElement('div');
   grid.className = 'form-row form-row-3 extended-fields';
-  for (const [key, label] of Object.entries(profileSchema[section])) {
+  grid.dataset.fieldSection = section;
+  const fieldOrder = {
+    basicInfo: ['sourcePlace', 'registeredAddress', 'leagueJoinDate', 'partyJoinDate', 'nationality', 'height', 'weight', 'health'],
+    awards: ['issuer', 'rank', 'role', 'url', 'description'],
+    jobIntention: ['salaryCurrency', 'salaryUnit', 'salaryPeriod', 'acceptAdjustment', 'acceptCounty'],
+    papers: ['name', 'date', 'publisher', 'authorOrder', 'role', 'url', 'abstract'],
+    patents: ['name', 'inventor', 'date', 'url', 'description'],
+    declarations: ['question', 'answer', 'company', 'hostname', 'explanation']
+  };
+  const fields = (fieldOrder[section] || Object.keys(profileSchema[section])).map(key => [key, profileSchema[section][key]]);
+  for (const [key, label] of fields) {
     const group = document.createElement('div');
     group.className = 'form-group';
+    group.dataset.field = key;
     const caption = document.createElement('label');
     caption.textContent = label;
     const yesNo = ['fullTime', 'highestFullTime', 'acceptAdjustment', 'acceptCounty'].includes(key) || (section === 'declarations' && key === 'answer');
@@ -3104,12 +3220,18 @@ function appendExtendedFields(root, section, values = {}) {
     else if (multiline) input.rows = 3;
     else input.type = 'text';
     input.dataset.extKey = key;
-    input.value = Array.isArray(values[key]) ? values[key].join('\n') : values[key] || '';
+    setFieldValue(input, Array.isArray(values[key]) ? values[key].join('\n') : values[key]);
     if (/date$/i.test(key)) input.placeholder = 'YYYY-MM 或 YYYY-MM-DD';
     if (section === 'declarations' && key === 'question') input.placeholder = '例如：是否有亲属在本公司任职或退休？';
     if (key === 'hostname') input.placeholder = '例如：job.xiaohongshu.com';
     group.append(caption, input);
     grid.append(group);
+  }
+  if (section === 'basicInfo' && values.politicalJoinDate) {
+    const legacy = document.createElement('p');
+    legacy.className = 'legacy-political-date';
+    legacy.textContent = `旧入党团时间：${values.politicalJoinDate}。请核对后分别填写入团时间或入党时间，旧记录仍保留。`;
+    grid.append(legacy);
   }
   root.append(grid);
   initAllAppleSelects(grid);

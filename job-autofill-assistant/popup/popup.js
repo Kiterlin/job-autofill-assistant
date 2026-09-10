@@ -666,7 +666,7 @@ function exportData() {
       URL.revokeObjectURL(url);
       showToast('数据导出成功', 'success');
     } else {
-      showToast('导出失败，请重试', 'error');
+      showToast('导出失败：' + (response?.error || '请重试'), 'error');
     }
   });
 }
@@ -685,7 +685,7 @@ function importData(e) {
           updateStatus();
           showToast('数据导入成功', 'success');
         } else {
-          showToast('导入失败：数据格式不匹配', 'error');
+          showToast('导入失败：' + (response?.error || '数据格式不匹配'), 'error');
         }
       });
     } catch (e) {

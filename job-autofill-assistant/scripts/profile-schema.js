@@ -1,6 +1,6 @@
 // 扩展字段共用定义：存储、编辑器与解析器使用相同键名；空值不代表“否”。
 const profileSchema = {
-  basicInfo: { sourcePlace: '生源地', registeredAddress: '户籍地', nationality: '国籍', politicalJoinDate: '入党团时间', height: '身高（cm）', weight: '体重（kg）', health: '健康状况' },
+  basicInfo: { sourcePlace: '生源地', registeredAddress: '户籍地', nationality: '国籍', leagueJoinDate: '入团时间', partyJoinDate: '入党时间', height: '身高（cm）', weight: '体重（kg）', health: '健康状况' },
   jobIntention: { acceptAdjustment: '是否服从调剂', acceptCounty: '是否接受县级公司工作', salaryCurrency: '薪资币种', salaryUnit: '金额单位', salaryPeriod: '月薪/年薪周期' },
   education: { academicDegree: '学位', secondMajor: '第二专业', schoolCity: '学校所在城市', advisor: '导师', laboratory: '实验室', researchArea: '研究方向', fullTime: '是否全日制', highestFullTime: '是否最高全日制学历', majorStatus: '主修状态' },
   projects: { projectLevel: '项目级别' },
