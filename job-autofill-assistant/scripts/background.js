@@ -4,21 +4,40 @@
 // ============================================================================
 
 // 导入storage manager（在service worker中需要用importScripts）
-importScripts('storage.js', 'resume-parser.js', 'app-log.js');
+importScripts('profile-schema.js', 'attachments.js', 'storage.js', 'resume-parser.js', 'app-log.js');
 
 console.log('[秋招助手] Background Service Worker 已启动');
 if (typeof appLog !== 'undefined') appLog.info('background', 'sw.start', '后台服务已启动');
 
 // 初始化存储
-storageManager.initialize().then(() => {
+const storageReady = storageManager.initialize();
+storageReady.then(() => {
   console.log('[秋招助手] 存储初始化完成');
 });
 
 // 监听消息
+let dataMessageQueue = Promise.resolve();
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (['aiGenerate', 'parseResume'].includes(request.action)) return dispatchMessage(request, sender, sendResponse);
+  dataMessageQueue = dataMessageQueue.catch(() => {}).then(() => storageReady).then(() => new Promise(resolve => {
+    dispatchMessage(request, sender, response => { sendResponse(response); resolve(); });
+  }));
+  dataMessageQueue.catch(error => sendResponse({ success: false, error: error.message }));
+  return true;
+});
+
+function dispatchMessage(request, sender, sendResponse) {
   console.log('[秋招助手] 收到消息:', request.action);
 
   switch (request.action) {
+    case 'saveAttachment':
+    case 'getAttachment':
+    case 'deleteAttachment':
+    case 'getStorageInfo':
+      handleAttachmentMessage(request).then(result => sendResponse({ success: true, ...result }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     case 'getActiveProfile':
       handleGetActiveProfile(sendResponse);
       return true; // 异步响应
@@ -134,7 +153,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     default:
       sendResponse({ success: false, error: 'Unknown action' });
   }
-});
+}
 
 // ============================================================================
 // 消息处理函数
@@ -420,3 +439,13 @@ chrome.runtime.onInstalled.addListener((details) => {
     console.log('[秋招助手] 更新到版本:', chrome.runtime.getManifest().version);
   }
 });
+
+async function handleAttachmentMessage(request) {
+  await storageReady;
+  if (request.action === 'getStorageInfo') return { info: await storageManager.getStorageInfo() };
+  if (request.action === 'getAttachment') return { file: await storageManager.getAttachment(request.profileId, request.id) };
+  const attachments = request.action === 'saveAttachment'
+    ? await storageManager.saveAttachment(request.profileId, request.kind, request.file, request.replaceId)
+    : await storageManager.deleteAttachment(request.profileId, request.kind, request.id);
+  return { attachments };
+}

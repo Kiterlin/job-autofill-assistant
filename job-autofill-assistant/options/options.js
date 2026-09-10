@@ -158,7 +158,7 @@ function emptyEducation() {
     college: '',
     major: '',
     degree: '',
-    degreeType: '普通全日制统招',
+    degreeType: '',
     schoolType: '',
     startDate: '',
     endDate: '',
@@ -175,7 +175,7 @@ function emptyWork() {
     company: '',
     department: '',
     position: '',
-    workType: '实习',
+    workType: '',
     city: '',
     startDate: '',
     endDate: '',
@@ -189,7 +189,7 @@ function emptyProject() {
     id: generateId(),
     name: '',
     role: '',
-    projectType: '商业项目',
+    projectType: '',
     techStack: '',
     startDate: '',
     endDate: '',
@@ -204,7 +204,7 @@ function emptyAward() {
   return {
     id: generateId(),
     name: '',
-    level: '校级',
+    level: '',
     date: ''
   };
 }
@@ -381,12 +381,11 @@ function setInputValue(id, value) {
 function toDateInput(value) {
   const v = String(value || '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  if (/^\d{4}-\d{2}$/.test(v)) return `${v}-01`;
+  if (/^\d{4}-\d{2}$/.test(v)) return v;
   const matched = v.match(/^(\d{4})[./年-](\d{1,2})(?:[./月-](\d{1,2}))?/);
   if (matched) {
     const month = matched[2].padStart(2, '0');
-    const day = (matched[3] || '01').padStart(2, '0');
-    return `${matched[1]}-${month}-${day}`;
+    return `${matched[1]}-${month}${matched[3] ? '-' + matched[3].padStart(2, '0') : ''}`;
   }
   return '';
 }
@@ -438,7 +437,7 @@ function initBirthDatePicker() {
     }
 
     const prevVal = selectedDay || daySelect.value;
-    daySelect.innerHTML = '<option value="">日</option>';
+    daySelect.innerHTML = '<option value="">日（可不填）</option>';
     for (let d = 1; d <= maxDays; d++) {
       const val = String(d).padStart(2, '0');
       const opt = document.createElement('option');
@@ -467,9 +466,9 @@ function initBirthDatePicker() {
     if (y && m && d) {
       hiddenDate.value = `${y}-${m}-${d}`;
     } else if (y && m) {
-      hiddenDate.value = `${y}-${m}-01`;
+      hiddenDate.value = `${y}-${m}`;
     } else if (y) {
-      hiddenDate.value = `${y}-01-01`;
+      hiddenDate.value = ''; // 尚未提供月份时，不推断月日。
     } else {
       hiddenDate.value = '';
     }
@@ -540,7 +539,7 @@ function syncBirthDatePickerFromValue(val) {
     maxDays = 30;
   }
 
-  daySelect.innerHTML = '<option value="">日</option>';
+  daySelect.innerHTML = '<option value="">日（可不填）</option>';
   for (let d = 1; d <= maxDays; d++) {
     const dVal = String(d).padStart(2, '0');
     const opt = document.createElement('option');
@@ -659,6 +658,8 @@ function upgradeToAppleSelect(select) {
   const trigger = document.createElement('button');
   trigger.type = 'button';
   trigger.className = 'apple-custom-select-trigger';
+  const fieldLabel = [...select.labels].map(label => label.textContent.trim()).join(' ');
+  if (fieldLabel) trigger.setAttribute('aria-label', fieldLabel);
 
   const label = document.createElement('span');
   label.className = 'apple-custom-select-label';
@@ -917,7 +918,7 @@ function loadProfileToForm(profile) {
   renderSkillsList(profile.skills || []);
 
   document.getElementById('introduction').value = profile.introTemplates?.default || '';
-  updateResumeAttachmentUI(profile.resumeFileName || '', 0);
+  updateResumeAttachmentUI(profile.attachments?.resume?.name || profile.resumeFileName || '', profile.attachments?.resume?.size || 0);
 
   const greetingEl = document.getElementById('hrGreetingText');
   if (greetingEl) {
@@ -925,6 +926,7 @@ function loadProfileToForm(profile) {
     updateGreetingCharCount(profile.hrGreeting || '');
   }
 
+  renderExtendedProfile(profile);
   // 刷新所有 Apple 自定义下拉选框
   initAllAppleSelects();
 }
@@ -961,6 +963,7 @@ function renderEducationList(educationList) {
           <div class="select-box">
             <select class="edu-degree">
               <option value="">请选择</option>
+              <option value="高中" ${edu.degree === '高中' ? 'selected' : ''}>高中</option>
               <option value="大专" ${edu.degree === '大专' ? 'selected' : ''}>大专</option>
               <option value="本科" ${edu.degree === '本科' ? 'selected' : ''}>本科</option>
               <option value="硕士" ${edu.degree === '硕士' ? 'selected' : ''}>硕士</option>
@@ -973,7 +976,8 @@ function renderEducationList(educationList) {
           <label>培养方式</label>
           <div class="select-box">
             <select class="edu-degree-type">
-              <option value="普通全日制统招" ${edu.degreeType === '普通全日制统招' || !edu.degreeType ? 'selected' : ''}>普通全日制统招</option>
+              <option value="">请选择</option>
+              <option value="普通全日制统招" ${edu.degreeType === '普通全日制统招' ? 'selected' : ''}>普通全日制统招</option>
               <option value="非全日制" ${edu.degreeType === '非全日制' ? 'selected' : ''}>非全日制</option>
               <option value="海外留学生" ${edu.degreeType === '海外留学生' ? 'selected' : ''}>海外留学生</option>
               <option value="定向委培" ${edu.degreeType === '定向委培' ? 'selected' : ''}>定向委培</option>
@@ -1018,7 +1022,12 @@ function renderEducationList(educationList) {
         <label>主修核心课程</label>
         <textarea class="edu-courses" rows="2" placeholder="例如: 数据结构与算法、计算机网络、操作系统、计算机体系结构、数据库原理">${html(edu.courses)}</textarea>
       </div>
+      <div class="form-group">
+        <label>在校经历 / 补充说明</label>
+        <textarea class="edu-description" rows="3" placeholder="在校职务、荣誉、论文及其他补充信息">${html(edu.description)}</textarea>
+      </div>
     `;
+    appendExtendedFields(card, 'education', edu);
     container.appendChild(card);
   });
 
@@ -1058,7 +1067,8 @@ function renderWorkList(workList) {
           <label>工作性质</label>
           <div class="select-box">
             <select class="work-type">
-              <option value="实习" ${work.workType === '实习' || !work.workType ? 'selected' : ''}>实习</option>
+              <option value="">请选择</option>
+              <option value="实习" ${work.workType === '实习' ? 'selected' : ''}>实习</option>
               <option value="全职" ${work.workType === '全职' ? 'selected' : ''}>全职</option>
               <option value="兼职" ${work.workType === '兼职' ? 'selected' : ''}>兼职</option>
             </select>
@@ -1124,6 +1134,7 @@ function renderProjectList(projectList) {
           <label>项目类型</label>
           <div class="select-box">
             <select class="proj-type">
+              <option value="">请选择</option>
               <option value="商业项目" ${project.projectType === '商业项目' ? 'selected' : ''}>商业项目</option>
               <option value="科研课题" ${project.projectType === '科研课题' ? 'selected' : ''}>科研课题</option>
               <option value="竞赛获奖" ${project.projectType === '竞赛获奖' ? 'selected' : ''}>竞赛获奖</option>
@@ -1165,6 +1176,7 @@ function renderProjectList(projectList) {
         <textarea class="proj-achieve" rows="2" placeholder="例如: 荣获全国大学生计算机设计大赛一等奖，系统上线稳定支撑 10w+ 用户访问">${html(project.achievements)}</textarea>
       </div>
     `;
+    appendExtendedFields(card, 'projects', project);
     container.appendChild(card);
   });
 
@@ -1197,9 +1209,10 @@ function renderAwardsList(awardsList) {
           <label>获奖级别</label>
           <div class="select-box">
             <select class="award-level">
+              <option value="">请选择</option>
               <option value="国家级" ${award.level === '国家级' ? 'selected' : ''}>国家级</option>
               <option value="省部级" ${award.level === '省部级' ? 'selected' : ''}>省部级</option>
-              <option value="校级" ${award.level === '校级' || !award.level ? 'selected' : ''}>校级</option>
+              <option value="校级" ${award.level === '校级' ? 'selected' : ''}>校级</option>
               <option value="院系级" ${award.level === '院系级' ? 'selected' : ''}>院系级</option>
               <option value="企业级/行业级" ${award.level === '企业级/行业级' ? 'selected' : ''}>企业级/行业级</option>
             </select>
@@ -1212,6 +1225,7 @@ function renderAwardsList(awardsList) {
         </div>
       </div>
     `;
+    appendExtendedFields(card, 'awards', award);
     container.appendChild(card);
   });
 
@@ -1243,6 +1257,7 @@ function renderFamilyList(members) {
         <div class="form-group"><label>工作单位</label><input type="text" class="family-employer" value="${attr(member.employer)}"></div>
         <div class="form-group"><label>职务</label><input type="text" class="family-position" value="${attr(member.position)}"></div>
       </div>`;
+    appendExtendedFields(card, 'familyMembers', member);
     container.appendChild(card);
   });
   container.querySelectorAll('.btn-delete[data-type="family"]').forEach((btn) => {
@@ -1340,15 +1355,10 @@ function bindEvents() {
 
   const removeAttachmentBtn = document.getElementById('removeResumeFileBtn');
   if (removeAttachmentBtn) {
-    removeAttachmentBtn.addEventListener('click', () => {
-      if (currentProfile) {
-        currentProfile.resumeFile = null;
-        currentProfile.resumeFileName = '';
-      }
+    removeAttachmentBtn.addEventListener('click', async () => {
+      try { await changeAttachment('deleteAttachment', 'resume', { id: currentProfile.attachments?.resume?.id }); }
+      catch (error) { showToast(error.message, 'error'); return; }
       clearSelectedAiResumeFile();
-      updateResumeAttachmentUI('', 0);
-      debouncedSave();
-      showToast('已移除简历源文件附件', 'info');
     });
   }
   document.getElementById('parseTextBtn').addEventListener('click', parseResumeText);
@@ -1483,9 +1493,12 @@ function bindEvents() {
   document.getElementById('testOcrBtn')?.addEventListener('click', testOcrConnection);
 
   document.getElementById('ocrApiKey').addEventListener('input', scheduleOcrSettingsSave);
+  document.addEventListener('input', event => { if (event.target.matches('[data-ext-key]')) debouncedSave(); });
+  document.addEventListener('change', event => { if (event.target.matches('select[data-ext-key]')) debouncedSave(); });
 }
 
 async function switchProfile(profileId) {
+  clearTimeout(profileSaveTimer);
   const response = await sendMessage({ action: 'setActiveProfile', profileId });
   if (response.success) {
     clearSelectedAiResumeFile();
@@ -1556,18 +1569,20 @@ function collectEducationData() {
   const education = [];
   document.querySelectorAll('#educationList .item-card').forEach((card) => {
     education.push({
+      ...readExtendedFields(card),
       id: card.querySelector('.edu-school').getAttribute('data-id') || generateId(),
       school: card.querySelector('.edu-school').value.trim(),
       college: card.querySelector('.edu-college')?.value.trim() || '',
       major: card.querySelector('.edu-major').value.trim(),
       degree: card.querySelector('.edu-degree').value,
-      degreeType: card.querySelector('.edu-degree-type')?.value || '普通全日制统招',
+      degreeType: card.querySelector('.edu-degree-type')?.value || '',
       schoolType: card.querySelector('.edu-school-type')?.value || '',
       gpa: card.querySelector('.edu-gpa').value.trim(),
       rank: card.querySelector('.edu-rank')?.value.trim() || '',
       startDate: card.querySelector('.edu-start')?.value.trim() || '',
       endDate: card.querySelector('.edu-end')?.value.trim() || '',
-      courses: card.querySelector('.edu-courses')?.value.trim() || ''
+      courses: card.querySelector('.edu-courses')?.value.trim() || '',
+      description: card.querySelector('.edu-description')?.value.trim() || ''
     });
   });
   return education;
@@ -1581,7 +1596,7 @@ function collectWorkData() {
       company: card.querySelector('.work-company').value.trim(),
       department: card.querySelector('.work-department')?.value.trim() || '',
       position: card.querySelector('.work-position').value.trim(),
-      workType: card.querySelector('.work-type')?.value || '实习',
+      workType: card.querySelector('.work-type')?.value || '',
       city: card.querySelector('.work-city')?.value.trim() || '',
       startDate: card.querySelector('.work-start')?.value.trim() || '',
       endDate: card.querySelector('.work-end')?.value.trim() || '',
@@ -1597,10 +1612,11 @@ function collectProjectData() {
   document.querySelectorAll('#projectList .item-card').forEach((card) => {
     const tech = card.querySelector('.proj-tech')?.value.trim() || '';
     projects.push({
+      ...readExtendedFields(card),
       id: card.querySelector('.proj-name').getAttribute('data-id') || generateId(),
       name: card.querySelector('.proj-name').value.trim(),
       role: card.querySelector('.proj-role').value.trim(),
-      projectType: card.querySelector('.proj-type')?.value || '商业项目',
+      projectType: card.querySelector('.proj-type')?.value || '',
       techStack: tech,
       technologies: tech ? tech.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : [],
       startDate: card.querySelector('.proj-start')?.value.trim() || '',
@@ -1618,9 +1634,10 @@ function collectAwardsData() {
   const awards = [];
   document.querySelectorAll('#awardsList .item-card').forEach((card) => {
     awards.push({
+      ...readExtendedFields(card),
       id: card.querySelector('.award-name').getAttribute('data-id') || generateId(),
       name: card.querySelector('.award-name').value.trim(),
-      level: card.querySelector('.award-level')?.value || '校级',
+      level: card.querySelector('.award-level')?.value || '',
       date: card.querySelector('.award-date')?.value.trim() || ''
     });
   });
@@ -1629,6 +1646,7 @@ function collectAwardsData() {
 
 function collectFamilyData() {
   return [...document.querySelectorAll('#familyList .item-card')].map((card) => ({
+    ...readExtendedFields(card),
     id: card.querySelector('.family-name')?.getAttribute('data-id') || generateId(),
     name: card.querySelector('.family-name')?.value.trim() || '',
     relation: card.querySelector('.family-relation')?.value.trim() || '',
@@ -1650,7 +1668,7 @@ function collectCertificatesData() {
 }
 
 function collectProfileUpdates() {
-  return {
+  const updates = {
     basicInfo: {
       fullName: document.getElementById('fullName').value.trim(),
       firstName: document.getElementById('firstName').value.trim(),
@@ -1706,9 +1724,11 @@ function collectProfileUpdates() {
       default: document.getElementById('introduction').value.trim()
     },
     hrGreeting: document.getElementById('hrGreetingText')?.value.trim() || '',
-    resumeFile: currentProfile?.resumeFile || null,
-    resumeFileName: currentProfile?.resumeFileName || ''
+
   };
+  const merged = mergeProfile(currentProfile || {}, collectExtendedProfile(updates));
+  delete merged.attachments; delete merged.resumeFile; delete merged.resumeFileName;
+  return merged;
 }
 
 function debouncedSave() {
@@ -1741,7 +1761,7 @@ async function saveProfile({ silent = false } = {}) {
     });
 
     if (response1.success && response2.success) {
-      currentProfile = { ...(currentProfile || {}), ...updates, id: activeProfileId };
+      currentProfile = mergeProfile(currentProfile || {}, { ...updates, id: activeProfileId });
       if (typeof appLog !== 'undefined') appLog.success('options', 'profile.save', silent ? '资料已静默保存' : '资料已保存');
       if (!silent) showToast('资料与设置已保存', 'success');
       return true;
@@ -1974,15 +1994,7 @@ function handleAiFileImport(e) {
   selectedAiResumeFile = file;
 
   // 自动保留源文件（用于网申页面自动上传简历附件）
-  const reader = new FileReader();
-  reader.onload = function (event) {
-    if (!currentProfile) currentProfile = {};
-    currentProfile.resumeFile = event.target.result;
-    currentProfile.resumeFileName = file.name;
-    updateResumeAttachmentUI(file.name, file.size);
-    debouncedSave();
-  };
-  reader.readAsDataURL(file);
+  saveAttachmentFile('resume', file).catch(error => showToast(error.message, 'error'));
 
   document.getElementById('resumeText').value = '';
   setAiFileStatus(
@@ -2115,6 +2127,7 @@ function fillParsedData(data) {
     throw new Error('AI 返回的数据格式不正确');
   }
 
+  currentProfile = mergeProfile(currentProfile, collectProfileUpdates());
   currentProfile.basicInfo = currentProfile.basicInfo || {};
   const bi = data.basicInfo || {};
   const basicFields = [
@@ -2132,7 +2145,7 @@ function fillParsedData(data) {
   });
   if (bi.birthDate) {
     const birth = toDateInput(bi.birthDate);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(birth)) {
+    if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(birth)) {
       document.getElementById('birthDate').value = birth;
       currentProfile.basicInfo.birthDate = birth;
     }
@@ -2204,6 +2217,19 @@ function fillParsedData(data) {
     currentProfile.introTemplates = currentProfile.introTemplates || { default: '', custom: [] };
     currentProfile.introTemplates.default = data.introduction;
   }
+  for (const section of Object.keys(profileSchema)) {
+    if (profileListKeys.includes(section)) {
+      if (['papers', 'patents', 'openSource', 'customAnswers', 'declarations'].includes(section) && data[section]?.length) {
+        currentProfile[section] = data[section].map(item => ({ ...item, id: generateId() }));
+      }
+    } else {
+      for (const key of Object.keys(profileSchema[section])) {
+        if (data[section]?.[key]?.length) currentProfile[section][key] = data[section][key];
+      }
+    }
+  }
+  renderExtendedProfile(currentProfile);
+
 }
 
 async function deleteCurrentProfile() {
@@ -2820,11 +2846,10 @@ function bindSubmissionEvents() {
 // ============================================================================
 
 function initSidebarNav() {
-  const drawer = document.getElementById('sidebarDrawer');
   const links = document.querySelectorAll('.sidebar-link');
   if (!links.length) return;
 
-  // 点击平滑滚动定位并自动收起抽屉
+  // 目录与正文顺序一致，点击后定位到对应资料模块。
   links.forEach((link) => {
     link.addEventListener('click', (e) => {
       e.preventDefault();
@@ -2836,41 +2861,12 @@ function initSidebarNav() {
         links.forEach((l) => l.classList.remove('active'));
         link.classList.add('active');
 
-        // 点击跳转后立即收起抽屉
-        if (drawer) {
-          drawer.classList.add('force-collapsed');
-          setTimeout(() => {
-            drawer.classList.remove('force-collapsed');
-          }, 350);
-        }
       }
     });
   });
 
-  // 点击快速保存后也自动收起抽屉
-  document.getElementById('sidebarSaveBtn')?.addEventListener('click', () => {
-    if (drawer) {
-      drawer.classList.add('force-collapsed');
-      setTimeout(() => {
-        drawer.classList.remove('force-collapsed');
-      }, 350);
-    }
-  });
-
   // 滚动监听高亮
-  const sectionIds = [
-    'section-ai',
-    'section-parser',
-    'section-basic',
-    'section-intention',
-    'section-family', 'section-certificates', 'section-awards',
-    'section-education',
-    'section-work',
-    'section-projects',
-    'section-skills'
-  ];
-
-  const sections = sectionIds.map((id) => document.getElementById(id)).filter(Boolean);
+  const sections = [...document.querySelectorAll('#view-profile .form-content > .section[id]')];
 
   let scrollTimer = null;
   window.addEventListener('scroll', () => {
@@ -2882,7 +2878,7 @@ function initSidebarNav() {
 
       for (let i = 0; i < sections.length; i++) {
         const sec = sections[i];
-        const top = sec.offsetTop;
+        const top = sec.getBoundingClientRect().top + window.scrollY;
         const height = sec.offsetHeight;
         if (scrollPos >= top && scrollPos < top + height) {
           currentSectionId = sec.id;
@@ -2891,7 +2887,7 @@ function initSidebarNav() {
       }
 
       if (!currentSectionId && sections.length > 0) {
-        if (scrollPos < sections[0].offsetTop) {
+        if (scrollPos < sections[0].getBoundingClientRect().top + window.scrollY) {
           currentSectionId = sections[0].id;
         } else {
           currentSectionId = sections[sections.length - 1].id;
@@ -3088,4 +3084,297 @@ async function exportLogs() {
   a.click();
   URL.revokeObjectURL(url);
   if (typeof appLog !== 'undefined') appLog.info('options', 'log.export', `已导出 ${logs.length} 条日志`);
+}
+
+function appendExtendedFields(root, section, values = {}) {
+  const grid = document.createElement('div');
+  grid.className = 'form-row form-row-3 extended-fields';
+  for (const [key, label] of Object.entries(profileSchema[section])) {
+    const group = document.createElement('div');
+    group.className = 'form-group';
+    const caption = document.createElement('label');
+    caption.textContent = label;
+    const yesNo = ['fullTime', 'highestFullTime', 'acceptAdjustment', 'acceptCounty'].includes(key) || (section === 'declarations' && key === 'answer');
+    const multiline = !yesNo && (['description', 'abstract', 'answer', 'explanation', 'question'].includes(key) || section === 'commonAnswers');
+    const input = document.createElement(yesNo ? 'select' : multiline ? 'textarea' : 'input');
+    input.id = `ext-${section}-${key}-${crypto.randomUUID()}`;
+    caption.htmlFor = input.id;
+    if (multiline) group.classList.add('field-wide');
+    if (yesNo) for (const value of ['', '是', '否']) input.add(new Option(value || '未填写', value));
+    else if (multiline) input.rows = 3;
+    else input.type = 'text';
+    input.dataset.extKey = key;
+    input.value = Array.isArray(values[key]) ? values[key].join('\n') : values[key] || '';
+    if (/date$/i.test(key)) input.placeholder = 'YYYY-MM 或 YYYY-MM-DD';
+    if (section === 'declarations' && key === 'question') input.placeholder = '例如：是否有亲属在本公司任职或退休？';
+    if (key === 'hostname') input.placeholder = '例如：job.xiaohongshu.com';
+    group.append(caption, input);
+    grid.append(group);
+  }
+  root.append(grid);
+  initAllAppleSelects(grid);
+}
+
+function readExtendedFields(root) {
+  return Object.fromEntries([...root.querySelectorAll('[data-ext-key]')].map(input => [input.dataset.extKey,
+    input.dataset.extKey === 'programmingLanguages' ? input.value.split('\n').map(s => s.trim()).filter(Boolean) : input.value.trim()]));
+}
+
+function renderExtendedList(section, root, entries) {
+  root.replaceChildren();
+  for (const entry of entries) {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.dataset.entryId = entry.id;
+    appendExtendedFields(card, section, entry);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn-delete';
+    remove.textContent = '删除条目';
+    remove.onclick = () => { card.remove(); debouncedSave(); };
+    card.append(remove);
+    root.append(card);
+  }
+}
+
+// 标题和目录共用线性图标，避免依赖系统 Emoji 字形。
+function profileIcon(key) {
+  const paths = {
+    ai: '<rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6v6H9zM9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3m14-6h3m-3 6h3"/>',
+    parser: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h5"/>',
+    basic: '<circle cx="12" cy="7" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',
+    intention: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+    education: '<path d="m2 9 10-5 10 5-10 5zM6 11v6c4 3 8 3 12 0v-6m4-2v7"/>',
+    work: '<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4M3 12a20 20 0 0 0 18 0M12 11v4"/>',
+    projects: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 4h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    awards: '<path d="M8 3h8v7a4 4 0 0 1-8 0zM8 5H3v3a4 4 0 0 0 5 4m8-7h5v3a4 4 0 0 1-5 4M12 14v7m-4 0h8"/>',
+    certificates: '<circle cx="12" cy="8" r="5"/><path d="m8 12-2 9 6-3 6 3-2-9"/>',
+    papers: '<path d="M4 3h12a2 2 0 0 1 2 2v16H6a2 2 0 0 1-2-2zm0 14h14M8 7h6m-6 4h6"/>',
+    patents: '<path d="M9 18h6m-6 3h6M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4H9c0-2 0-3-1-4"/>',
+    openSource: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18"/>',
+    skills: '<path d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/>',
+    commonAnswers: '<path d="M21 15a3 3 0 0 1-3 3H8l-5 4V5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3zM7 7h10M7 12h7"/>',
+    customAnswers: '<path d="M21 15a3 3 0 0 1-3 3H8l-5 4V5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3zM9 7a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3h.01"/>',
+    family: '<circle cx="9" cy="7" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M17 3a4 4 0 0 1 0 8m2 4a6 6 0 0 1 3 6"/>',
+    declarations: '<path d="m12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6zM8 12l3 3 5-6"/>',
+    actions: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2M7 3v6h10V3M7 21v-8h10v8"/>',
+    address: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+    language: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>'
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[key]}</svg>`;
+}
+
+// 页面顺序和目录共用同一份定义，动态新增模块不会落到操作栏之后。
+function arrangeProfileSections() {
+  const order = [
+    ['ai', 'AI 模型配置'], ['parser', '简历解析与附件'],
+    ['basic', '基础个人信息'], ['intention', '求职意向与语言'],
+    ['education', '教育经历'], ['work', '工作 / 实习经历'], ['projects', '项目经历'],
+    ['awards', '荣誉奖项'], ['certificates', '资格证书'],
+    ['papers', '论文'], ['patents', '专利'], ['openSource', '开源成果'],
+    ['skills', '技能与自我介绍'], ['commonAnswers', '常用问答'], ['customAnswers', '额外问题与答案'],
+    ['family', '家庭成员'], ['declarations', '个人声明'], ['actions', '保存 / 删除资料']
+  ];
+  document.querySelectorAll('#view-profile [data-heading-icon]').forEach(heading => {
+    heading.querySelector('.heading-icon')?.remove();
+    const icon = document.createElement('span');
+    icon.className = 'heading-icon';
+    icon.innerHTML = profileIcon(heading.dataset.headingIcon);
+    heading.prepend(icon);
+  });
+  const content = document.querySelector('#view-profile .form-content');
+  const menu = document.querySelector('.sidebar-menu');
+  for (const [key, title] of order) {
+    const id = `section-${key}`;
+    const section = document.getElementById(id);
+    content.append(section);
+    const heading = section.querySelector('.section-title');
+    if (heading) {
+      let icon = section.querySelector('.section-icon');
+      if (!icon) {
+        icon = document.createElement('span');
+        icon.className = 'section-icon';
+        heading.prepend(icon);
+      }
+      icon.innerHTML = profileIcon(key);
+    }
+    let link = menu.querySelector(`[data-section="${id}"]`);
+    if (!link) {
+      link = document.createElement('a');
+      link.className = 'sidebar-link';
+      link.href = `#${id}`;
+      link.dataset.section = id;
+      const icon = document.createElement('span');
+      icon.className = 'nav-icon'; icon.textContent = '·'; icon.setAttribute('aria-hidden', 'true');
+      const text = document.createElement('span'); text.className = 'nav-text'; text.textContent = title;
+      link.append(icon, text);
+    }
+    link.querySelector('.nav-icon').innerHTML = profileIcon(key);
+    menu.append(link);
+  }
+}
+
+function renderExtendedProfile(profile) {
+  const basic = document.getElementById('section-basic');
+  for (const [section, target] of [['basicInfo', 'section-basic'], ['jobIntention', 'section-intention']]) {
+    const root = document.getElementById(target);
+    root.querySelector('.extended-fields')?.remove();
+    appendExtendedFields(root, section, profile[section]);
+  }
+  for (const [section, title] of Object.entries({ papers: '论文', patents: '专利', openSource: '开源成果', commonAnswers: '常用问答', customAnswers: '额外问题与答案', declarations: '个人声明' })) {
+    let panel = document.getElementById(`section-${section}`);
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = `section-${section}`;
+      panel.className = 'section glass';
+      const heading = document.createElement('h2');
+      heading.className = 'section-title';
+      heading.textContent = title;
+      panel.append(heading);
+      basic.parentElement.append(panel);
+    }
+    while (panel.children.length > 1) panel.lastElementChild.remove();
+    if (section === 'declarations') {
+      const note = document.createElement('p');
+      note.textContent = '亲属任职或退休、境外身份、违法违纪等按原题逐项保存。未填写不代表否。自动填写需匹配企业和域名，并每次确认；承诺、签名请本人操作。';
+      panel.append(note);
+    }
+    if (section === 'commonAnswers') appendExtendedFields(panel, section, profile[section]);
+    else {
+      const list = document.createElement('div');
+      list.dataset.extList = section;
+      renderExtendedList(section, list, profile[section] || []);
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'btn-add-item btn-add-entry';
+      add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+      const addLabel = document.createElement('span');
+      addLabel.textContent = `添加${title === '额外问题与答案' ? '问答' : title}`;
+      add.append(addLabel);
+      add.onclick = () => {
+        const entries = [...list.children].map(card => ({ id: card.dataset.entryId, ...readExtendedFields(card) }));
+        entries.push({ id: generateId() });
+        renderExtendedList(section, list, entries);
+        debouncedSave();
+      };
+      panel.append(list, add);
+    }
+  }
+  arrangeProfileSections();
+  for (const input of basic.parentElement.querySelectorAll('input[class*="-start"],input[class*="-end"],input[class*="-date"],input[class*="-expiry"],#graduationDate')) {
+    input.placeholder = 'YYYY-MM 或 YYYY-MM-DD（结束时间也可填至今）';
+  }
+  renderAttachmentPanel();
+}
+
+function collectExtendedProfile(updates) {
+  for (const [section, target] of [['basicInfo', 'section-basic'], ['jobIntention', 'section-intention'], ['commonAnswers', 'section-commonAnswers']]) {
+    const root = document.getElementById(target);
+    if (root) updates[section] = { ...updates[section], ...readExtendedFields(root) };
+  }
+  for (const [section, target] of [['education', 'educationList'], ['projects', 'projectList'], ['awards', 'awardsList'], ['familyMembers', 'familyList']]) {
+    document.querySelectorAll(`#${target} .item-card`).forEach((card, index) => Object.assign(updates[section][index], readExtendedFields(card)));
+  }
+  for (const list of document.querySelectorAll('[data-ext-list]')) {
+    updates[list.dataset.extList] = [...list.children].map(card => ({ id: card.dataset.entryId, ...readExtendedFields(card) }));
+  }
+  return updates;
+}
+
+async function changeAttachment(action, kind, extra) {
+  const profileId = extra.profileId || activeProfileId;
+  const response = await sendMessage({ action, profileId, kind, ...extra });
+  if (!response.success) throw new Error(response.error || '附件保存失败');
+  if (profileId === activeProfileId) {
+    currentProfile.attachments = response.attachments;
+    if (kind === 'resume') { currentProfile.resumeFile = null; currentProfile.resumeFileName = ''; }
+    renderAttachmentPanel();
+    updateResumeAttachmentUI(currentProfile.attachments.resume?.name || '', currentProfile.attachments.resume?.size || 0);
+  }
+}
+
+async function saveAttachmentFile(kind, file, replaceId) {
+  const profileId = activeProfileId;
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file);
+  });
+  await changeAttachment('saveAttachment', kind, { profileId, file: { name: file.name, size: file.size, type: file.type, dataUrl }, replaceId });
+}
+
+function renderAttachmentPanel() {
+  let root = document.getElementById('attachmentPanel');
+  if (!root) {
+    root = document.createElement('div'); root.id = 'attachmentPanel';
+    document.getElementById('section-parser').append(root);
+  }
+  root.replaceChildren();
+  const heading = document.createElement('h3');
+  heading.className = 'attachment-panel-title'; heading.textContent = '附件管理';
+  const grid = document.createElement('div'); grid.className = 'attachment-grid';
+  root.append(heading, grid);
+  for (const [kind, title] of Object.entries({ resume: '简历', idPhoto: '证件照', lifePhoto: '生活照', works: '作品附件' })) {
+    const group = document.createElement('section'); group.className = 'attachment-card';
+    const header = document.createElement('div'); header.className = 'attachment-card-header';
+    const label = document.createElement('h4'); label.textContent = title;
+    const hint = document.createElement('span'); hint.className = 'attachment-kind-hint';
+    hint.textContent = kind === 'works' ? '支持多个文件' : /Photo$/.test(kind) ? '图片 · 保存一份' : '保存一份';
+    header.append(label, hint); group.append(header);
+    const input = document.createElement('input'); input.type = 'file'; input.multiple = kind === 'works';
+    input.hidden = true; input.setAttribute('aria-label', `上传${title}`);
+    if (/Photo$/.test(kind)) input.accept = 'image/*';
+    input.onchange = async () => {
+      try { for (const file of input.files) await saveAttachmentFile(kind, file); }
+      catch (error) { showToast(error.message, 'error'); }
+    };
+    group.append(input);
+    const files = kind === 'works' ? currentProfile.attachments?.works || [] : [currentProfile.attachments?.[kind]].filter(Boolean);
+    if (!files.length) {
+      const empty = document.createElement('p'); empty.className = 'attachment-empty';
+      empty.textContent = `尚未上传${title}`; group.append(empty);
+    }
+    for (const file of files) {
+      const row = document.createElement('div'); row.className = 'attachment-file';
+      const meta = document.createElement('div'); meta.className = 'attachment-file-meta';
+      const name = document.createElement('span'); name.className = 'attachment-file-name'; name.textContent = file.name;
+      const size = document.createElement('span'); size.className = 'attachment-file-size'; size.textContent = formatAiFileSize(file.size);
+      meta.append(name, size); row.append(meta);
+      const actions = document.createElement('div'); actions.className = 'attachment-file-actions';
+      for (const [action, title] of [['download', '下载'], ['replace', '替换'], ['delete', '删除']]) {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = title;
+        button.className = `attachment-action${action === 'delete' ? ' is-danger' : ''}`;
+        button.setAttribute('aria-label', `${title} ${file.name}`);
+        button.onclick = async () => {
+          try {
+            if (action === 'delete') await changeAttachment('deleteAttachment', kind, { id: file.id });
+            else if (action === 'replace') {
+              const picker = document.createElement('input'); picker.type = 'file'; picker.accept = input.accept;
+              picker.onchange = () => picker.files[0] && saveAttachmentFile(kind, picker.files[0], file.id).catch(error => showToast(error.message, 'error'));
+              picker.click();
+            } else {
+              const response = await sendMessage({ action: 'getAttachment', profileId: activeProfileId, id: file.id });
+              if (!response.success) throw new Error(response.error);
+              const link = document.createElement('a'); link.href = response.file.dataUrl; link.download = file.name; link.click();
+            }
+          } catch (error) { showToast(error.message, 'error'); }
+        };
+        actions.append(button);
+      }
+      row.append(actions); group.append(row);
+    }
+    if (!files.length || kind === 'works') {
+      const upload = document.createElement('button'); upload.type = 'button';
+      upload.className = 'btn-add-item attachment-upload';
+      upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg>';
+      upload.append(document.createTextNode(`上传${title}`));
+      upload.onclick = () => input.click(); group.append(upload);
+    }
+    grid.append(group);
+  }
+  sendMessage({ action: 'getStorageInfo' }).then(response => {
+    if (!response.success || !root.isConnected) return;
+    const info = document.createElement('p'); info.className = 'attachment-storage-info';
+    info.textContent = `资料与附件实际占用 ${response.info.sizeInMB} MB（附件 ${formatAiFileSize(response.info.attachmentBytes)}）；可用配额由当前浏览器管理。`;
+    root.append(info);
+  }).catch(console.warn);
 }

@@ -74,10 +74,10 @@ export function makeChromeStorage() {
       local: {
         get(key, cb) {
           const k = typeof key === 'string' ? key : Object.keys(key)[0];
-          cb({ [k]: store[k] });
+          cb({ [k]: store[k] === undefined ? undefined : structuredClone(store[k]) });
         },
         set(obj, cb) {
-          Object.assign(store, obj);
+          Object.assign(store, structuredClone(obj));
           cb && cb();
         },
         remove(key, cb) {
@@ -104,7 +104,7 @@ export function makeChromeStorage() {
 }
 
 export function loadScript(rel, extra = {}) {
-  const code = read(rel);
+  const code = read('scripts/profile-schema.js') + '\n' + read('scripts/attachments.js') + '\n' + read(rel);
   const chrome = extra.chrome || makeChromeStorage();
   const ctx = {
     chrome,
@@ -169,6 +169,8 @@ export function loadScript(rel, extra = {}) {
   vm.createContext(ctx);
   vm.runInContext(
     code + `
+this.attachmentStore = attachmentStore;
+this.profileWithoutFiles = profileWithoutFiles;
 this.resumeParser = typeof resumeParser !== 'undefined' ? resumeParser : this.resumeParser;
 this.storageManager = typeof storageManager !== 'undefined' ? storageManager : this.storageManager;
 this.ResumeParser = typeof ResumeParser !== 'undefined' ? ResumeParser : this.ResumeParser;

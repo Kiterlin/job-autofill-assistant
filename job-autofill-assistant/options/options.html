@@ -131,16 +131,7 @@
   </nav>
 
   <!-- 屏幕左边缘悬浮抽屉式目录导航栏 (仅在简历配置视图有效) -->
-  <aside class="sidebar-drawer" id="sidebarDrawer" title="点击或鼠标悬停查看页面目录">
-    <div class="drawer-handle">
-      <span class="drawer-icon">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      </span>
-      <span class="drawer-label">
-        <span>目</span>
-        <span>录</span>
-      </span>
-    </div>
+  <aside class="sidebar-drawer" id="sidebarDrawer" aria-label="资料页目录">
     <div class="drawer-content">
       <div class="sidebar-header">
         <span class="sidebar-title">简历模块快速直达</span>
@@ -309,7 +300,7 @@
             <div class="ocr-settings-header">
               <div>
                 <div class="ocr-settings-title">硅基流动 DeepSeek-OCR 兜底</div>
-                <div class="ocr-settings-desc">填入 API Key 后自动启用，接口、模型和识别提示词均已内置</div>
+                <div class="ocr-settings-desc">优先使用所选模型的多模态能力；模型不支持时使用 OCR，未配置 OCR 则尝试本地提取文字</div>
               </div>
               <span class="ocr-fixed-badge">当前免费</span>
             </div>
@@ -458,6 +449,7 @@
             </div>
           </div>
         </div>
+      <div id="attachmentPanel"></div>
       </section>
 
       <!-- 基础个人信息 -->
@@ -477,7 +469,7 @@
         <!-- 子区域 1: 核心身份与联系方式 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>📇 核心身份与联系方式</h4>
+            <h4 data-heading-icon="basic">核心身份与联系方式</h4>
             <span class="card-tag">网申必填</span>
           </div>
           <div class="form-row form-row-4">
@@ -540,7 +532,7 @@
         <!-- 子区域 2: 政治面貌与身份背景 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>🏛️ 政治面貌与身份背景</h4>
+            <h4 data-heading-icon="declarations">政治面貌与身份背景</h4>
             <span class="card-tag">国企/央企/银行/大厂高频</span>
           </div>
           <div class="form-row form-row-4">
@@ -563,7 +555,7 @@
               <input type="text" id="ethnicity" placeholder="如: 汉族">
             </div>
             <div class="form-group">
-              <label>籍贯 / 生源地</label>
+              <label>籍贯</label>
               <input type="text" id="hometown" placeholder="如: 山东青岛">
             </div>
             <div class="form-group">
@@ -595,7 +587,7 @@
         <!-- 子区域 3: 紧急联系人 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>🚨 紧急联系人</h4>
+            <h4 data-heading-icon="family">紧急联系人</h4>
             <span class="card-tag">校招背调常用</span>
           </div>
           <div class="form-row form-row-3">
@@ -617,7 +609,7 @@
         <!-- 子区域 4: 居住地与通信地址 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>📍 居住地与通信地址</h4>
+            <h4 data-heading-icon="address">居住地与通信地址</h4>
             <span class="card-tag">国内/海外</span>
           </div>
           <div class="form-row form-row-4">
@@ -647,7 +639,7 @@
         <!-- 子区域 5: 社交与作品集主页 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>🌐 社交主页与个人作品集</h4>
+            <h4 data-heading-icon="language">社交主页与个人作品集</h4>
             <span class="card-tag">加分项</span>
           </div>
           <div class="form-row form-row-4">
@@ -692,7 +684,7 @@
         <!-- 子区域 1: 求职投递意向 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>🎯 求职投递意向</h4>
+            <h4 data-heading-icon="intention">求职投递意向</h4>
             <span class="card-tag">目标匹配</span>
           </div>
           <div class="form-row form-row-3">
@@ -740,7 +732,7 @@
         <!-- 子区域 2: 外语与语言能力 -->
         <div class="sub-card">
           <div class="sub-card-header">
-            <h4>🗣️ 外语与语言水平</h4>
+            <h4 data-heading-icon="language">外语与语言水平</h4>
             <span class="card-tag">英语考级/留学生</span>
           </div>
           <div class="form-row form-row-4">
@@ -940,7 +932,7 @@
       </section>
 
       <!-- 底部操作按钮区 -->
-      <section class="section actions-section glass">
+      <section id="section-actions" class="section actions-section glass">
         <div class="actions-container">
           <button id="deleteProfileBtn" class="btn-danger-glass">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -1260,6 +1252,7 @@
   <div id="toast" class="toast" style="display: none;"></div>
 
   <script src="../scripts/app-log.js"></script>
+  <script src="../scripts/profile-schema.js"></script>
   <script src="../scripts/resume-parser.js"></script>
   <script src="options.js"></script>
 </body>

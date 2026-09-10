@@ -12,7 +12,7 @@ class StorageManager {
 
   // 获取默认空资料模板
   getEmptyProfile() {
-    return {
+    const profile = {
       id: this.generateId(),
       name: '默认资料',
       createdAt: new Date().toISOString(),
@@ -184,6 +184,7 @@ class StorageManager {
       resumeFile: null,
       resumeFileName: ''
     };
+    return this.normalizeProfile(profile, profile);
   }
 
   // 生成唯一ID
@@ -218,6 +219,7 @@ class StorageManager {
         console.log('[存储] 初始化完成');
         return defaultData;
       }
+      await this.migrateAttachments(data);
       console.log('[存储] 加载现有数据');
       return data;
     } catch (error) {
@@ -266,24 +268,6 @@ class StorageManager {
         // 添加更新时间戳
         data.updatedAt = new Date().toISOString();
 
-        // 检查数据大小（Chrome限制5MB）
-        const dataStr = JSON.stringify(data);
-        const sizeInBytes = new Blob([dataStr]).size;
-        const sizeInMB = (sizeInBytes / (1024 * 1024)).toFixed(2);
-
-        console.log(`[存储] 数据大小: ${sizeInMB}MB (${sizeInBytes} 字节)`);
-
-        if (sizeInBytes > 5 * 1024 * 1024) {
-          const error = new Error(`数据过大(${sizeInMB}MB)，超过5MB限制。请删除部分资料或简历文件。`);
-          console.error('[存储]', error.message);
-          reject(error);
-          return;
-        }
-
-        if (sizeInBytes > 4 * 1024 * 1024) {
-          console.warn(`[存储] 警告: 数据接近上限(${sizeInMB}MB/5MB)`);
-        }
-
         chrome.storage.local.set({ [this.storageKey]: data }, () => {
           if (chrome.runtime.lastError) {
             console.error('[存储] 保存失败:', chrome.runtime.lastError);
@@ -327,25 +311,28 @@ class StorageManager {
   fixData(data) {
     if (!Array.isArray(data.profiles)) data.profiles = [];
     if (!data.settings || typeof data.settings !== 'object') data.settings = {};
-    data.profiles.forEach((profile) => {
-      profile.basicInfo = profile.basicInfo || {};
-      profile.jobIntention = profile.jobIntention || {};
-      profile.languageSkills = profile.languageSkills || {};
-      if (!Array.isArray(profile.familyMembers)) profile.familyMembers = [];
-      if (!Array.isArray(profile.awards)) profile.awards = [];
-      if (!Array.isArray(profile.education)) profile.education = [];
-      if (!Array.isArray(profile.workExperience)) profile.workExperience = [];
-      if (!Array.isArray(profile.projects)) profile.projects = [];
-      if (!Array.isArray(profile.skills)) profile.skills = [];
-      if (!Array.isArray(profile.certificates)) profile.certificates = [];
-      profile.certificates = profile.certificates.map((item) => typeof item === 'string' ? {
-        id: this.generateId(), name: item, code: '', issuer: '', date: '', expiryDate: ''
-      } : item);
-    });
+    data.profiles = data.profiles.map(profile => this.normalizeProfile(profile));
     if (!data.activeProfileId && data.profiles.length > 0) {
       data.activeProfileId = data.profiles[0].id;
     }
     return data;
+  }
+
+  normalizeProfile(profile, template) {
+    template = template || this.getEmptyProfile();
+    for (const section of ['basicInfo', 'jobIntention', 'languageSkills', 'commonAnswers']) {
+      profile[section] = { ...template[section], ...extendedDefaults(section), ...profile[section] };
+    }
+    for (const section of profileListKeys) {
+      profile[section] = (Array.isArray(profile[section]) ? profile[section] : []).map(item => ({
+        ...template[section]?.[0], ...extendedDefaults(section), id: this.generateId(),
+        ...(typeof item === 'string' ? { name: item, code: '', issuer: '', date: '', expiryDate: '' } : item)
+      }));
+    }
+    profile.skills = Array.isArray(profile.skills) ? profile.skills : [];
+    profile.attachments = { resume: null, idPhoto: null, lifePhoto: null, works: [], ...profile.attachments };
+    profile.introTemplates = { default: '', custom: [], ...profile.introTemplates };
+    return profile;
   }
 
   // 获取当前激活的资料
@@ -399,7 +386,7 @@ class StorageManager {
       const index = data.profiles.findIndex(p => p.id === profileId);
       if (index !== -1) {
         updates.updatedAt = new Date().toISOString();
-        data.profiles[index] = { ...data.profiles[index], ...updates };
+        data.profiles[index] = this.normalizeProfile(mergeProfile(data.profiles[index], updates));
         await this.saveAll(data);
         console.log('[存储] 更新资料:', profileId);
         return true;
@@ -420,11 +407,13 @@ class StorageManager {
         console.warn('[存储] 至少保留一份资料');
         return false;
       }
+      const removed = data.profiles.find(p => p.id === profileId);
       data.profiles = data.profiles.filter(p => p.id !== profileId);
       if (data.activeProfileId === profileId) {
         data.activeProfileId = data.profiles[0].id;
       }
       await this.saveAll(data);
+      if (removed) await Promise.all(this.attachmentRefs(removed).map(ref => attachmentStore.remove(ref.id).catch(console.warn)));
       console.log('[存储] 删除资料:', profileId);
       return true;
     } catch (error) {
@@ -766,11 +755,94 @@ class StorageManager {
     }
   }
 
+  attachmentRefs(profile) {
+    const a = profile.attachments || {};
+    return [a.resume, a.idPhoto, a.lifePhoto, ...(a.works || [])].filter(Boolean);
+  }
+
+  async writeAttachment(file) {
+    const blob = attachmentStore.decode(file);
+    const record = { id: this.generateId(), name: file.name, blob };
+    await attachmentStore.put(record);
+    const check = await attachmentStore.get(record.id);
+    const expected = new Uint8Array(await blob.arrayBuffer());
+    const actual = check && new Uint8Array(await check.blob.arrayBuffer());
+    if (!actual || actual.length !== expected.length || actual.some((byte, i) => byte !== expected[i])) {
+      await attachmentStore.remove(record.id);
+      throw new Error('附件写入核对失败');
+    }
+    return { id: record.id, name: file.name, size: blob.size, type: blob.type };
+  }
+
+  async migrateAttachments(data) {
+    for (const profile of data.profiles) {
+      if (!profile.resumeFile?.startsWith('data:')) continue;
+      try {
+        const ref = await this.writeAttachment({ name: profile.resumeFileName || 'resume.pdf', dataUrl: profile.resumeFile });
+        const previous = { ...profile, attachments: { ...profile.attachments } };
+        profile.attachments.resume = ref;
+        profile.resumeFile = null;
+        profile.resumeFileName = '';
+        try { await this.saveAll(data); }
+        catch (error) { Object.assign(profile, previous); await attachmentStore.remove(ref.id); throw error; }
+      } catch (error) { console.warn('[附件] 迁移未完成，保留旧附件:', error.message); }
+    }
+  }
+
+  async saveAttachment(profileId, kind, file, replaceId) {
+    if (!['resume', 'idPhoto', 'lifePhoto', 'works'].includes(kind)) throw new Error('未知附件用途');
+    const data = await this.loadAll();
+    const profile = data.profiles.find(p => p.id === profileId);
+    if (!profile) throw new Error('资料不存在');
+    const old = kind === 'works' ? profile.attachments.works.find(f => f.id === replaceId) : profile.attachments[kind];
+    if (kind === 'works' && replaceId && !old) throw new Error('原附件不存在');
+    if (/Photo$/.test(kind) && !attachmentStore.decode(file).type.startsWith('image/')) throw new Error('照片附件必须是图片');
+    const ref = await this.writeAttachment(file);
+    if (kind === 'works') profile.attachments.works = [...profile.attachments.works.filter(f => f.id !== replaceId), ref];
+    else profile.attachments[kind] = ref;
+    if (kind === 'resume') { profile.resumeFile = null; profile.resumeFileName = ''; }
+    try { await this.saveAll(data); }
+    catch (error) { await attachmentStore.remove(ref.id); throw error; }
+    if (old) await attachmentStore.remove(old.id).catch(console.warn);
+    return profile.attachments;
+  }
+
+  async getAttachment(profileId, id) {
+    const data = await this.loadAll();
+    const profile = data.profiles.find(p => p.id === profileId);
+    if (!profile || !this.attachmentRefs(profile).some(f => f.id === id)) throw new Error('附件引用不存在');
+    const file = await attachmentStore.get(id);
+    if (!file) throw new Error('附件内容不存在');
+    return attachmentStore.encode(file);
+  }
+
+  async deleteAttachment(profileId, kind, id) {
+    if (!['resume', 'idPhoto', 'lifePhoto', 'works'].includes(kind)) throw new Error('未知附件用途');
+    const data = await this.loadAll();
+    const profile = data.profiles.find(p => p.id === profileId);
+    if (!profile) throw new Error('资料不存在');
+    const old = kind === 'works' ? profile.attachments.works.find(f => f.id === id) : profile.attachments[kind];
+    if (kind === 'works') profile.attachments.works = profile.attachments.works.filter(f => f.id !== id);
+    else profile.attachments[kind] = null;
+    if (kind === 'resume') { profile.resumeFile = null; profile.resumeFileName = ''; }
+    await this.saveAll(data);
+    if (old) await attachmentStore.remove(old.id).catch(console.warn);
+    return profile.attachments;
+  }
+
   // 导出数据（备份）
   async exportData() {
     try {
       const data = await this.loadAll();
-      return JSON.stringify(data, null, 2);
+      const attachmentContents = {};
+      for (const profile of data.profiles) {
+        for (const ref of this.attachmentRefs(profile)) {
+          const file = await attachmentStore.get(ref.id);
+          if (!file) throw new Error(`附件丢失：${ref.name}`);
+          attachmentContents[ref.id] = await attachmentStore.encode(file);
+        }
+      }
+      return JSON.stringify({ ...data, version: '2.0.0', attachmentContents }, null, 2);
     } catch (error) {
       console.error('[存储] 导出数据失败:', error);
       throw error;
@@ -784,7 +856,36 @@ class StorageManager {
       if (!this.validateData(data)) {
         throw new Error('数据格式不正确');
       }
-      await this.saveAll(data);
+      if (!data.profiles.length || data.profiles.some(p => !p || typeof p !== 'object' || typeof p.id !== 'string') ||
+          new Set(data.profiles.map(p => p.id)).size !== data.profiles.length ||
+          (data.activeProfileId && !data.profiles.some(p => p.id === data.activeProfileId))) throw new Error('资料 ID 不正确');
+      if (data.version && !['1.0.0', '2.0.0'].includes(data.version)) throw new Error('不支持此备份版本');
+      const pending = [];
+      for (const profile of data.profiles) {
+        for (const key of profileListKeys) if (profile[key] != null && (!Array.isArray(profile[key]) || profile[key].some(item => !item || (typeof item !== 'object' && !(key === 'certificates' && typeof item === 'string'))))) throw new Error(`资料列表格式不正确：${key}`);
+        for (const key of ['basicInfo', 'jobIntention', 'languageSkills', 'commonAnswers', 'attachments']) if (profile[key] != null && (typeof profile[key] !== 'object' || Array.isArray(profile[key]))) throw new Error(`资料格式不正确：${key}`);
+        if (profile.attachments?.works && !Array.isArray(profile.attachments.works)) throw new Error('作品附件格式不正确');
+        for (const ref of this.attachmentRefs(profile)) {
+          const file = data.attachmentContents?.[ref.id];
+          if (!file || ref.name !== file.name || ref.size !== file.size || ref.type !== file.type) throw new Error('附件引用核对失败');
+          if (attachmentStore.decode(file).type !== file.type) throw new Error('附件类型核对失败');
+          pending.push({ ref, file });
+        }
+        if (profile.resumeFile?.startsWith('data:')) attachmentStore.decode({ name: profile.resumeFileName || 'resume.pdf', dataUrl: profile.resumeFile });
+      }
+      const created = [];
+      try {
+        for (const { ref, file } of pending) {
+          const replacement = await this.writeAttachment(file);
+          created.push(replacement.id);
+          Object.assign(ref, replacement);
+        }
+        delete data.attachmentContents;
+        await this.saveAll(this.fixData(data));
+      } catch (error) {
+        await Promise.all(created.map(id => attachmentStore.remove(id)));
+        throw error;
+      }
       console.log('[存储] 导入数据成功');
       return true;
     } catch (error) {
@@ -809,20 +910,12 @@ class StorageManager {
 
   // 获取存储使用情况
   async getStorageInfo() {
-    return new Promise((resolve) => {
-      chrome.storage.local.getBytesInUse(this.storageKey, (bytes) => {
-        const sizeInMB = (bytes / (1024 * 1024)).toFixed(2);
-        const percentUsed = ((bytes / (5 * 1024 * 1024)) * 100).toFixed(1);
-        resolve({
-          bytes,
-          sizeInMB,
-          percentUsed,
-          limit: '5MB'
-        });
-      });
-    });
+    const bytes = await new Promise(resolve => chrome.storage.local.getBytesInUse(this.storageKey, resolve));
+    const attachmentBytes = (await attachmentStore.all()).reduce((sum, file) => sum + file.blob.size, 0);
+    const estimate = await navigator.storage.estimate();
+    return { bytes, attachmentBytes, sizeInMB: ((bytes + attachmentBytes) / 1024 / 1024).toFixed(2),
+      localQuota: chrome.storage.local.QUOTA_BYTES, originUsage: estimate.usage, originQuota: estimate.quota };
   }
 }
 
-// 导出单例
 const storageManager = new StorageManager();

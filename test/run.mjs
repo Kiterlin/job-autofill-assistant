@@ -69,6 +69,8 @@ function missingLocalCalls(js, extraKnown = []) {
 section('语法与清单');
 
 for (const rel of [
+  'scripts/profile-schema.js',
+  'scripts/attachments.js',
   'scripts/resume-parser.js',
   'scripts/storage.js',
   'scripts/background.js',
@@ -96,7 +98,7 @@ try {
   const missingFiles = files.filter((f) => !exists(f));
   if (missingFiles.length) fail('manifest 引用文件存在', missingFiles.join(', '));
   else ok('manifest 引用文件存在', `${files.length} 个路径`);
-  for (const extra of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'scripts/storage.js', 'scripts/resume-parser.js']) {
+  for (const extra of ['vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/cmaps/Adobe-GB1-UCS2.bcmap', 'scripts/storage.js', 'scripts/resume-parser.js']) {
     if (exists(extra)) ok(`资源 ${extra}`);
     else fail(`资源 ${extra}`, '文件不存在');
   }
@@ -219,7 +221,7 @@ try {
     "github": "github.com/zihan-dev-test",
     "city": "北京"
   },
-  "education": [{"school":"北京航空航天大学","major":"计算机科学与技术","degree":"硕士"}],
+  "education": [{"school":"北京航空航天大学","major":"计算机科学与技术","degree":"硕士","description":"班长；会议论文一篇；一等奖学金（2次）"}],
   "workExperience": [{"company":"字节跳动","position":"后端开发实习生"}],
   "projects": [{"name":"智能简历解析助手"}],
   "skills": ["Python", "FastAPI"],
@@ -229,8 +231,10 @@ try {
 `);
   if (parsed.basicInfo.fullName !== '张子涵') throw new Error('姓名未解析');
   if (parsed.basicInfo.phone !== '13812345678') throw new Error('手机号未清洗: ' + parsed.basicInfo.phone);
-  if (parsed.basicInfo.lastName !== '张') throw new Error('中文姓名未拆分');
+  if (parsed.basicInfo.lastName || parsed.basicInfo.firstName) throw new Error('未标注姓/名时不应自动拆分');
   if (!parsed.education[0].school.includes('航空')) throw new Error('教育经历丢失');
+  if (parsed.education[0].description !== '班长；会议论文一篇；一等奖学金（2次）') throw new Error('教育补充信息丢失');
+  if (parsed.education[0].degreeType !== '') throw new Error('未提供的培养方式必须留空');
   if (parsed.hrGreeting !== undefined) throw new Error('提取结果不应再包含 hrGreeting');
   ok('parseAIResponse 能从混杂文本抽出 JSON 并清洗');
 } catch (e) {
@@ -272,7 +276,7 @@ try {
 try {
   const garbage = `When converting images, the text may appear blurry. Suggested: \\begin{itemize} \\item Use proper model`;
   if (!parser.looksLikeBadOcr(garbage)) throw new Error('应识别 OCR 胡话');
-  if (parser.looksLikeBadOcr('# 孙露鹏\n电话 13961090143\n上海电力大学 硕士')) throw new Error('正常中文简历不该判胡话');
+  if (parser.looksLikeBadOcr('# 测试同学\n电话 13800000000\n示例大学 硕士')) throw new Error('正常中文简历不该判胡话');
   const cleaned = parser.cleanOcrMarkdown('<|ref|>title<|/ref|><|det|>[[1,2,3,4]]<|/det|>姓名：张三');
   if (!cleaned.includes('张三') || cleaned.includes('<|ref|>')) throw new Error(cleaned);
   ok('OCR 胡话检测与 grounding 标记清理');
@@ -294,6 +298,21 @@ try {
   ok('文件类型路由');
 } catch (e) {
   fail('文件类型路由', e.message);
+}
+
+try {
+  const greetingParser = loadScript('scripts/resume-parser.js').resumeParser;
+  greetingParser.chat = async (_settings, messages) => {
+    const prompt = messages.map(m => m.content).join('\n');
+    if (prompt.includes('data:application/pdf') || prompt.includes('ATTACHMENT_BYTES')) throw new Error('附件被发送到自荐语模型');
+    if (!prompt.includes('测试同学')) throw new Error('结构化资料丢失');
+    return '您好，我是测试同学';
+  };
+  const greeting = await greetingParser.generateHrGreeting({ basicInfo: { fullName: '测试同学' }, resumeFile: 'data:application/pdf;base64,ATTACHMENT_BYTES' }, { aiEnabled: true, aiApiKey: 'test' });
+  if (!greeting.includes('测试同学')) throw new Error('自荐语未返回');
+  ok('自荐语生成保留资料并排除 PDF 附件');
+} catch (e) {
+  fail('自荐语附件隔离', e.message);
 }
 
 try {
@@ -594,6 +613,103 @@ try {
 }
 
 // ---------------------------------------------------------------------------
+section('扩展资料与附件事务');
+try {
+  const ctx = loadScript('scripts/storage.js');
+  const sm = ctx.storageManager;
+  const files = new Map();
+  ctx.attachmentStore.put = async file => { files.set(file.id, file); };
+  ctx.attachmentStore.get = async id => files.get(id);
+  ctx.attachmentStore.remove = async id => files.delete(id);
+  await sm.initialize();
+  const initial = await sm.getActiveProfile();
+  const eduId = initial.education[0].id;
+  await sm.updateProfile(initial.id, { basicInfo: { hometown: '旧籍贯', customLegacy: '保留' },
+    education: [{ id: eduId, degree: '本科', startDate: '2020-09', customLegacy: '旧字段' }] });
+  await sm.updateProfile(initial.id, { basicInfo: { fullName: '独立测试' }, education: [{ id: eduId, major: '测试专业' }] });
+  const p = await sm.getActiveProfile();
+  if (p.basicInfo.customLegacy !== '保留' || p.basicInfo.sourcePlace || p.basicInfo.registeredAddress ||
+      p.education[0].academicDegree || p.education[0].startDate !== '2020-09' || p.education[0].customLegacy !== '旧字段') throw new Error('旧字段/日期精度/地址独立性被破坏');
+  const file = { name: 'sample.txt', dataUrl: 'data:text/plain;base64,YWJj', size: 3, type: 'text/plain' };
+  await sm.saveAttachment(p.id, 'resume', file);
+  const original = (await sm.getActiveProfile()).attachments.resume;
+  const save = sm.saveAll.bind(sm);
+  sm.saveAll = async () => { throw new Error('模拟存储写入失败'); };
+  let rejected = false;
+  try { await sm.saveAttachment(p.id, 'resume', { ...file, name: 'replacement.txt' }); } catch { rejected = true; }
+  sm.saveAll = save;
+  if (!rejected || !(await sm.getAttachment(p.id, original.id)).dataUrl.endsWith('YWJj')) throw new Error('保存失败丢失原附件');
+  const backup = await sm.exportData();
+  const bad = JSON.parse(backup); bad.attachmentContents[original.id].size = 99;
+  rejected = false;
+  try { await sm.importData(JSON.stringify(bad)); } catch { rejected = true; }
+  if (!rejected || (await sm.getActiveProfile()).attachments.resume.id !== original.id) throw new Error('无效导入替换现有资料');
+  await sm.importData(backup);
+  const restored = await sm.getActiveProfile();
+  if ((await sm.getAttachment(p.id, restored.attachments.resume.id)).dataUrl !== file.dataUrl) throw new Error('附件导出导入不一致');
+  await sm.updateProfile(p.id, { resumeFile: file.dataUrl, resumeFileName: 'legacy.txt' });
+  const legacy = await sm.loadAll();
+  sm.saveAll = async () => { throw new Error('迁移保存失败'); };
+  await sm.migrateAttachments(legacy);
+  sm.saveAll = save;
+  if (legacy.profiles[0].resumeFile !== file.dataUrl) throw new Error('迁移失败未保留内联文件');
+  await sm.migrateAttachments(legacy);
+  if ((await sm.getActiveProfile()).resumeFile) throw new Error('成功迁移未移除内联文件');
+  ok('旧资料合并、日期/学位/地址隔离、附件迁移与失败原子性、完整备份往返');
+} catch (error) { fail('扩展资料与附件事务', error.stack); }
+
+try {
+  const ctx = loadScript('scripts/resume-parser.js');
+  const clean = ctx.resumeParser.validateAndCleanData({ education: [{ school: '测试高中', degree: '高中', startDate: '2020-09' }], papers: [{ name: '测试论文', date: '2024-01-12' }], commonAnswers: { programmingLanguages: ['JS', 'Python'] } });
+  if (clean.education[0].academicDegree || clean.education[0].startDate !== '2020-09' || clean.papers[0].date !== '2024-01-12' || clean.commonAnswers.programmingLanguages.join() !== 'JS,Python') throw new Error('AI 清洗丢失新增字段或补造事实');
+  const repeated = ctx.resumeParser.validateAndCleanData({ education: [{ school: '同校', degree: '本科', academicDegree: '学士' }, { school: '同校', degree: '硕士', academicDegree: '硕士学位' }] });
+  if (repeated.education[1].academicDegree !== '硕士学位') throw new Error('同校不同经历串用学位');
+  const safe = ctx.profileWithoutFiles({ basicInfo: { fullName: '测试' }, resumeFile: 'BINARY', attachments: { resume: { dataUrl: 'BINARY' } } });
+  if (JSON.stringify(safe).includes('BINARY')) throw new Error('普通 AI 上下文包含附件');
+  ok('AI 扩展字段、日期精度与附件二进制隔离');
+} catch (error) { fail('AI 扩展结构', error.stack); }
+
+try {
+  const p = loadScript('scripts/resume-parser.js').resumeParser;
+  const settings = { aiEnabled: true, aiApiKey: 'test', aiProvider: 'doubao', aiModel: 'ep-custom', ocrApiKey: 'test' };
+  const file = new File(['image'], 'resume.png', { type: 'image/png' });
+  const calls = [];
+  p.parseDirectFile = async () => { calls.push('direct'); return { basicInfo: {} }; };
+  p.ocrFile = async () => { calls.push('ocr'); return '这是一份仅用于测试的简历，包含足够长度的真实格式占位文字。'; };
+  p.parseWithAI = async () => { calls.push('text'); return { basicInfo: {} }; };
+  await p.parseFileWithAI(file, settings);
+  if (calls.join() !== 'direct') throw Error('多模态成功仍调用 OCR');
+  calls.length = 0;
+  p.parseDirectFile = async () => { calls.push('direct'); throw Object.assign(new Error('This model does not support image input'), { status: 400 }); };
+  await p.parseFileWithAI(file, settings);
+  if (calls.join() !== 'direct,ocr,text') throw Error('不支持图像时未正确回退');
+  for (const status of [401, 429, 503]) {
+    calls.length = 0;
+    p.parseDirectFile = async () => { throw Object.assign(new Error('request failed'), { status }); };
+    try { await p.parseFileWithAI(file, settings); throw Error('应保留 API 错误'); }
+    catch (error) { if (error.status !== status) throw error; }
+    if (calls.length) throw Error('普通 API 错误触发了 OCR');
+  }
+  ok('多模态优先、能力不支持回退及 API 错误隔离');
+} catch (error) { fail('多模态路由', error.stack); }
+
+try {
+  const p = loadScript('scripts/resume-parser.js').resumeParser;
+  const file = new File(['pdf'], 'resume.pdf', { type: 'application/pdf' });
+  const settings = { aiProvider: 'openai', aiModel: 'gpt-4o' };
+  if (!p.canSendFileDirect(settings, file)) throw Error('视觉模型未优先读取 PDF');
+  p.renderPdfPagesToPng = async () => [{ mime: 'image/png', base64: 'PAGE_ONE' }, { mime: 'image/png', base64: 'PAGE_TWO' }];
+  p.callOpenAICompatible = async (_settings, _provider, messages) => {
+    const content = messages[1].content;
+    if (content[1].image_url.url !== 'data:image/png;base64,PAGE_ONE' || content[2].image_url.url !== 'data:image/png;base64,PAGE_TWO') throw Error('PDF 页顺序或图像格式错误');
+    return '{"basicInfo":{}}';
+  };
+  await p.parseDirectFile(file, settings);
+  const cleaned = p.validateAndCleanData({ basicInfo: { fullName: '欧阳某某' } });
+  if (cleaned.basicInfo.lastName || cleaned.basicInfo.firstName) throw Error('仍在自动猜测姓名拆分');
+  ok('PDF 多页直接视觉提取与姓名不推断');
+} catch (error) { fail('PDF 视觉与提取约束', error.stack); }
+
 section('汇总');
 const passed = results.filter((r) => r.pass).length;
 console.log(`\n${passed}/${results.length} 通过, ${failed} 失败`);

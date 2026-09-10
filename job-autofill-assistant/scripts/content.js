@@ -63,7 +63,7 @@
     if (!matched) {
       const candidates = opts.filter((opt) => {
         const t = opt.text.trim();
-        return t === `${valStr}月` || t === `${valStr}年` || (valStr.length > 1 && t.includes(valStr));
+        return t === `${valStr}月` || t === `${valStr}年` || ({ 硕士: '硕士研究生', 博士: '博士研究生' })[valStr] === t;
       });
       if (candidates.length === 1) matched = candidates[0];
     }
@@ -129,6 +129,7 @@
 
   function isSelectWidget(el) {
     if (!el) return false;
+    if (el.closest('.phoenix-select, [class*="sd-Select-container-"]')) return true;
     if (el.tagName === 'SELECT') return true;
     if (el.getAttribute('role') === 'combobox') return true;
     if (el.getAttribute('aria-haspopup') === 'listbox') return true;
@@ -162,6 +163,7 @@
     if (!el || !valStr) return false;
 
     if (el.tagName === 'SELECT') return setValue(el, valStr);
+    if (el.closest('[class*="sd-Select-container-"]')) return fillMokaSelect(el, valStr);
 
     const wrap = el.closest('.ant-select, .el-select, .rc-select, .semi-select, .arco-select') || el;
     const trigger = wrap.querySelector('.ant-select-selector, .el-input, .rc-select-selector, [class*="selector"]') || wrap;
@@ -169,12 +171,16 @@
     trigger.click();
     await sleep(180);
 
+    const selectedMatches = () => {
+      const selected = wrap.querySelector('.ant-select-selection-item, .el-select__selected-item, .rc-select-selection-item, .semi-select-selection-text, .arco-select-view-value');
+      return !!selected && optionTextEquals(selected.textContent, valStr);
+    };
     const opts = dropdownOptions(el);
     const hit = opts.find((o) => optionTextEquals(o.textContent, valStr));
     if (hit) {
       hit.click();
       await sleep(60);
-      return true;
+      return selectedMatches();
     }
 
     const search = wrap.querySelector('input') || (el.tagName === 'INPUT' ? el : null);
@@ -183,13 +189,14 @@
       await sleep(180);
       const opts2 = dropdownOptions(el);
       const exact = opts2.find((o) => optionTextEquals(o.textContent, valStr));
-      const partial = valStr.length > 1 ? opts2.filter((o) => String(o.textContent || '').includes(valStr)) : [];
-      const hit2 = exact || (partial.length === 1 ? partial[0] : null);
+      const hit2 = exact;
       if (hit2) {
         hit2.click();
         await sleep(60);
-        return true;
+        return selectedMatches();
       }
+      nativeSet(search, HTMLInputElement.prototype, '');
+      dispatchInputEvents(search, '');
     }
 
     document.body.click();
@@ -227,7 +234,7 @@
       : [el];
     const hit = group.find((r) => {
       const cap = choiceCaption(r);
-      return (cap && (cap === val || cap.includes(val) || val.includes(cap))) || String(r.value) === val;
+      return (cap && (cap === val || cap.split(/[，,、]/)[0] === val)) || String(r.value) === val;
     });
     if (!hit) return false;
     hit.click();
@@ -253,6 +260,10 @@
   async function fillField(el, value) {
     if (!el || value === undefined || value === null || String(value).trim() === '') return false;
     const target = writableBox(el) || el;
+    if (target.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+      markManual(target, `${value}（请确认具体日期）`); return false;
+    }
+    if (target.type === 'month' && /^\d{4}-\d{2}-\d{2}$/.test(String(value))) value = String(value).slice(0, 7);
     if (target.type === 'radio' || target.type === 'checkbox') return fillChoice(target, value);
 
     const valueToFill = valueWithinFieldLimit(target, value);
@@ -275,6 +286,12 @@
 
   function getClosestLabelText(input) {
     try {
+      const phoenix = input.closest('.form-item--phoenix');
+      if (phoenix) return cleanLabel(phoenix.querySelector('.form-item__title')?.textContent);
+      const mokaField = input.closest('[class*="apply-field-"]');
+      if (isMokaForm() && mokaField) {
+        return cleanLabel(mokaField.querySelector('[class^="title-"]')?.textContent);
+      }
       const labelledBy = (input.getAttribute('aria-labelledby') || '').split(/\s+/)
         .map((id) => document.getElementById(id)?.textContent || '').join(' ');
       const accessibleLabel = cleanLabel(labelledBy) || cleanLabel(input.getAttribute('aria-label'));
@@ -444,8 +461,8 @@
       /民族|ethnicity/i
     ],
     hometown: [
-      /^(hometown|native.*place|origin|籍贯|生源地|户籍|户口所在地)$/i,
-      /籍贯|生源地|户籍所在地|户口所在地/i
+      /^(hometown|native.*place|籍贯)$/i,
+      /籍贯/i
     ],
     graduationDate: [
       /^(graduation|grad.*date|毕业时间|毕业年月|预计毕业)$/i,
@@ -586,8 +603,8 @@
       /major|专业|学科|discipline/i
     ],
     degree: [
-      /^(degree|学历|education|edu.*level|最高学历)$/i,
-      /degree|学历|education/i
+      /^(学历|education|edu.*level|最高学历)$/i,
+      /学历|education/i
     ],
     degreeType: [
       /^(degree.*type|study.*type|培养方式|学习形式|学历类型|统招)$/i,
@@ -608,6 +625,10 @@
     courses: [
       /^(courses|major.*courses|主修课程|核心课程|专业课程)$/i,
       /主修课程|核心课程|专业课/i
+    ],
+    educationDescription: [
+      /^(education.*description|在校经历|在校描述|教育经历描述|在校表现)$/i,
+      /在校经历|在校描述|教育经历描述|在校表现/i
     ],
     eduStartDate: [
       /^(edu.*start|入学时间|入学年份|在读开始|就读开始|教育开始)$/i,
@@ -732,6 +753,7 @@
       return true;
     }
 
+    if (isProtectedQuestion(getClosestLabelText(element))) return true;
     const features = getElementFeatures(element);
     if (/^(query|keyword|keywords|kw|search_kw|search_key|search_input|q|searchword|searchinput)$/i.test(features.name) ||
         /^(query|keyword|keywords|kw|search_kw|search_key|search_input|q|searchword|searchinput)$/i.test(features.id)) {
@@ -945,7 +967,7 @@
         year,
         month,
         padMonth,
-        full: month ? `${year}-${padMonth}` : year
+        full: /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : (month ? `${year}-${padMonth}` : year)
       };
     }
     return { year: '', month: '', padMonth: '', full: clean };
@@ -969,7 +991,9 @@
     ['idCard', ['身份证号', '身份证', '证件号码', '证件号', 'idcard']],
     ['politicalStatus', ['政治面貌', '党派', '政治']],
     ['ethnicity', ['民族']],
-    ['hometown', ['户口所在地', '户籍所在地', '生源地', '籍贯', '户籍']],
+    ['hometown', ['籍贯']],
+    ['sourcePlace', ['生源地']],
+    ['registeredAddress', ['户口所在地', '户籍所在地', '户籍地', '户籍']],
     ['graduationDate', ['预计毕业时间', '毕业时间', '毕业年月', '毕业年份']],
     ['maritalStatus', ['婚姻状况', '婚姻情况', '婚否', 'maritalstatus']],
     ['currentCity', ['现居住城市', '现居住地', '目前所在地', '现所在地', '现居地']],
@@ -1002,8 +1026,10 @@
     ['school', ['最高学历院校', '毕业学校', '毕业院校', '就读院校', '学校名称', '院校名称', 'school', 'university']],
     ['college', ['所属学院', '院系名称', '学院', '院系']],
     ['major', ['所学专业', '专业名称', '专业', 'major']],
-    ['degree', ['最高学历', '学历学位', '学历层次', '学历', '学位', 'degree']],
-    ['degreeType', ['培养方式', '学习形式', '学历类型', '是否全日制', '全日制']],
+    ['degree', ['最高学历', '学历层次', '学历']],
+    ['academicDegree', ['学位', 'academicdegree']],
+    ['secondMajor', ['第二专业', '辅修专业']],
+    ['degreeType', ['培养方式', '学习形式', '学历类型']],
     ['schoolType', ['院校层次', '学校层次', '院校类别', '学校类型']],
     ['gpa', ['平均绩点', 'gpa', '绩点', '平均分']],
     ['rank', ['专业排名', '成绩排名', '班级排名', '排名']],
@@ -1041,7 +1067,9 @@
     edu: [
       ['school', ['学校', '院校', '高校', '名称']],
       ['major', ['专业']],
-      ['degree', ['学历', '学位', '层次']],
+      ['degree', ['学历', '层次']],
+      ['academicDegree', ['学位']],
+      ['secondMajor', ['第二专业', '辅修专业']],
       ['college', ['学院', '院系']],
       ['eduStartDate', ['开始时间', '开始日期', '起始时间', '入学']],
       ['eduEndDate', ['结束时间', '结束日期', '截止时间', '毕业']]
@@ -1102,7 +1130,22 @@
   }
 
   function matchFieldType(element) {
-    if (isIgnoredInput(element)) return null;
+    if (isIgnoredInput(element) || isProtectedQuestion(getClosestLabelText(element))) return null;
+    if (/^(自我评价|求职目标|游戏经历|编程语言|ai工具使用经历|爱好特长|优势不足)$/.test(getClosestLabelText(element))) return null;
+    if (isMokaForm() && element.closest('[class*="apply-field-"]')) {
+      if (/^(年|月)$/.test(element.placeholder || '')) return null;
+      const label = getClosestLabelText(element);
+      const block = element.closest('[data-nav-id]')?.getAttribute('data-nav-id');
+      if (block === 'block-practiceInfo' && label === '工作职责') return 'workDescription';
+      return ({
+        姓名: 'fullName', 手机号码: element.placeholder === '请输入手机号' ? 'phone' : null,
+        邮箱: 'email', 性别: 'gender', '出生日期 (年龄)': 'birthDate',
+        最高学历: 'degree', 籍贯: 'hometown', '当前所在城市（市）': 'currentCity',
+        推荐码: 'referralCode', 学校名称: 'school', 专业名称: 'major', 学历: 'degree',
+        公司名称: 'company', 职位名称: 'position', 项目名称: 'projectName',
+        项目描述: 'projectDescription', 项目中职责: 'projectResponsibilities', 作品集链接: 'portfolioLinks'
+      })[label] || null;
+    }
 
     const features = getElementFeatures(element);
     const hint = hintKey(features.label || features.placeholder);
@@ -1162,7 +1205,297 @@
   // 表单扫描与填充 (智能多段经历映射 · 智能字段解耦)
   // ========================================================================
 
+  function isXhsForm() {
+    return location.hostname === 'job.xiaohongshu.com' && !!document.querySelector('#form_item_name');
+  }
+
+  async function fillXhsControl(input, value) {
+    const picker = input.closest('.ant-picker');
+    if (picker) {
+      if (!/^\d{4}-\d{2}(?:-\d{2})?$/.test(String(value))) return false;
+      document.activeElement?.blur();
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.click();
+      await sleep(150);
+      input.focus();
+      input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      input.click();
+      await sleep(150);
+      const popup = () => [...document.querySelectorAll('.ant-picker-dropdown')].find(el => isElementTrulyVisible(el) && !/hidden|leave/.test(el.className));
+      for (let attempt = 0; attempt < 10 && !popup(); attempt++) await sleep(50);
+      const monthPanel = !!popup()?.querySelector('.ant-picker-month-panel');
+      const target = monthPanel ? String(value).slice(0, 7) : String(value);
+      let picked = false;
+      if (monthPanel || /^\d{4}-\d{2}-\d{2}$/.test(target)) {
+        for (let step = 0; step < 120; step++) {
+          const panel = popup();
+          if (!panel) break;
+          const cell = [...panel.querySelectorAll('td[title]:not(.ant-picker-cell-disabled)')].find(el => el.title === target);
+          if (cell) { cell.querySelector('.ant-picker-cell-inner')?.click(); picked = true; break; }
+          const year = parseInt(panel.querySelector('.ant-picker-year-btn')?.textContent, 10);
+          const month = parseInt(panel.querySelector('.ant-picker-month-btn')?.textContent, 10);
+          if (!year) break;
+          const targetYear = Number(target.slice(0, 4)), targetMonth = Number(target.slice(5, 7));
+          const direction = year !== targetYear ? (targetYear < year ? 'super-prev' : 'super-next')
+            : (!monthPanel && month ? (targetMonth < month ? 'prev' : 'next') : '');
+          if (!direction) break;
+          panel.querySelector(`.ant-picker-header-${direction}-btn`)?.click();
+          await sleep(45);
+        }
+      }
+      input.blur();
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.click();
+      await sleep(150);
+      return picked && input.value === target;
+    }
+    const select = input.closest('.ant-select');
+    if (!select || select.classList.contains('ant-select-auto-complete')) {
+      const ok = setValue(input, value);
+      input.blur();
+      await sleep(80);
+      return ok && input.value === String(value);
+    }
+    document.activeElement?.blur();
+    document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    document.body.click();
+    await sleep(150);
+    select.querySelector('.ant-select-selector').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
+    let hit;
+    for (let step = 0; step < 10 && !hit; step++) {
+      await sleep(100);
+      hit = [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')]
+        .find(el => isElementTrulyVisible(el) && !/leave|hidden/.test(el.closest('.ant-select-dropdown')?.className || '') && !el.classList.contains('ant-select-item-option-disabled') && optionTextEquals(el.textContent, value));
+    }
+    if (hit) hit.click();
+    document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    input.blur();
+    await sleep(100);
+    return !!hit && optionTextEquals(select.querySelector('.ant-select-selection-item')?.textContent, value);
+  }
+
+  async function fillXhsForm(profile) {
+    const items = () => [...document.querySelectorAll('.ant-form-item')];
+    const label = item => item.querySelector('.ant-form-item-label')?.textContent.trim();
+    const byLabel = name => items().filter(item => label(item) === name);
+    for (const [field, buttonText, entries] of [
+      ['学校', '添加教育经历', profile.education || []],
+      ['公司', '添加实习经历', profile.workExperience || []],
+      ['竞赛/奖项名称', '添加竞赛/奖项', profile.awards || []],
+      ['论文名称', '添加论文', profile.papers || []],
+      ['专利名称', '添加专利', profile.patents || []],
+      ['证书名称', '添加证书', (profile.certificates || []).filter(p => p.name)]
+    ]) {
+      while (byLabel(field).length < entries.length) {
+        const button = [...document.querySelectorAll('button,span')].find(el => el.textContent.trim() === buttonText && isElementTrulyVisible(el));
+        if (!button) break;
+        const count = byLabel(field).length;
+        button.click();
+        for (let step = 0; step < 10 && byLabel(field).length === count; step++) await sleep(100);
+        if (byLabel(field).length === count) break;
+      }
+    }
+    let filledCount = 0;
+    const manualFields = [];
+    const occurrences = {};
+    const intro = profile.introTemplates?.default || '';
+    const githubStars = [...intro.matchAll(/(\d+)\s*Stars\b/gi)].map(m => Number(m[1]));
+    const githubLinks = [...new Set([profile.basicInfo?.github, ...(profile.projects || []).map(p => p.projectUrl),
+      ...(intro.match(/https:\/\/github\.com\/[A-Za-z0-9_.\/-]+/g) || [])].filter(Boolean))];
+    for (const item of items()) {
+      const name = label(item);
+      const index = occurrences[name] || 0;
+      occurrences[name] = index + 1;
+      const inputs = [...item.querySelectorAll('input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),textarea')];
+      const input = inputs[0];
+      if (!input) continue;
+      const eduIndex = input.id.match(/resumeEducationInfo_(\d+)_/)?.[1];
+      const workIndex = input.id.match(/resumeEmploymentInfo_(\d+)_/)?.[1];
+      const edu = profile.education?.[eduIndex] || {};
+      const work = profile.workExperience?.[workIndex] || {};
+      const rankPercent = Number((edu.rank || '').match(/前\s*(\d+(?:\.\d+)?)\s*%/)?.[1]);
+      const rankBucket = rankPercent > 0 && [5, 10, 20, 25, 50].find(n => rankPercent <= n);
+      let values;
+      if (eduIndex !== undefined) values = ({
+        '起止时间': [edu.startDate, edu.endDate], '学校': [edu.school], '专业': [edu.major], '院系': [edu.college],
+        '学历': [({硕士:'硕士研究生',博士:'博士研究生'})[edu.degree] || edu.degree], '成绩排名': [rankBucket ? `TOP${rankBucket}%` : edu.rank]
+      })[name];
+      else if (workIndex !== undefined) values = ({
+        '起止时间': [work.startDate, work.endDate], '公司': [work.company], '部门': [work.department],
+        '职位': [work.position], '工作性质': [work.workType], '工作描述': [[work.description, work.achievements].filter(Boolean).join('\n')]
+      })[name];
+      else values = ({
+        '姓名': [profile.basicInfo?.fullName], '邮箱': [profile.basicInfo?.email],
+        'Github 链接': [(profile.openSource?.map(p => p.url).filter(Boolean).join('\n')) || githubLinks.join('\n')],
+        'Github 星级': [profile.openSource?.[0]?.stars || (githubStars.length ? String(Math.max(...githubStars)) : '')],
+        '竞赛/奖项名称': [profile.awards?.[index]?.name]
+      })[name];
+      if (!values) continue;
+      for (let i = 0; i < values.length; i++) {
+        const value = values[i], el = inputs[i];
+        if (!el || !value || fieldHasValue(el)) continue;
+        if (await fillXhsControl(el, value)) {
+          filledCount++;
+          el.style.backgroundColor = '#e8f5e9';
+          el.removeAttribute('data-job-autofill-manual');
+        } else {
+          const note = `${name}：${value}`;
+          el.setAttribute('data-job-autofill-manual', note);
+          el.title = `请手动选择 ${note}`;
+          manualFields.push(note);
+        }
+      }
+    }
+    filledCount += await fillExtendedFields(profile);
+    await handleResumeUpload(profile);
+    showNotification(`已填充 ${filledCount} 个字段` + (manualFields.length ? `；请手动选择：${manualFields.join('、')}` : '；未知资料请自行补充'), 'warning');
+    return {filledCount, manualFields, results: [], isForm: true};
+  }
+
+  function isBeisenForm() {
+    return location.hostname === 'chinalife.zhiye.com' && !!document.querySelector('.ux-standard-form');
+  }
+
+  // 每个 ux-standard-form 是一段独立经历，不能用页面上同名字段的顺序推断归属。
+  function beisenKind(form) {
+    const labels = [...form.querySelectorAll('.form-item__title')].map(el => el.textContent.trim());
+    if (labels.includes('文章名、书名')) return 'paper';
+    if (labels.includes('论文名称')) return 'paper';
+    if (labels.includes('专利名称')) return 'patent';
+    if (labels.includes('证书名称')) return 'certificate';
+    if (labels.includes('称谓')) return 'family';
+    if (labels.includes('学校')) return 'education';
+    if (labels.includes('单位名称')) return 'work';
+    if (labels.includes('项目名称')) return 'project';
+    if (labels.includes('奖项名称')) return 'award';
+    if (labels.includes('电子邮箱')) return 'basic';
+    if (labels.includes('技能类别')) return 'skills';
+    if (labels.includes('自我评价及求职目标')) return 'intro';
+    return '';
+  }
+
+  async function fillBeisenSelect(input, value) {
+    const wrap = input.closest('.phoenix-select');
+    document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    document.body.click();
+    await sleep(100);
+    input.focus();
+    wrap.click();
+    let hit;
+    for (let attempt = 0; attempt < 10 && !hit; attempt++) {
+      await sleep(100);
+      hit = [...document.querySelectorAll('.phoenix-selectList__listItem')].find(el =>
+        isElementTrulyVisible(el) && optionTextEquals(el.textContent, value) &&
+        !/disabled/i.test(el.className));
+    }
+    if (hit) hit.click();
+    document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    document.body.click();
+    input.blur();
+    await sleep(100);
+    return !!hit && optionTextEquals(wrap.querySelector('.phoenix-select__tipEle')?.textContent, value);
+  }
+
+  async function fillBeisenForm(profile) {
+    const lists = {
+      education: profile.education || [], work: profile.workExperience || [],
+      project: profile.projects || [], award: profile.awards || [], family: profile.familyMembers || [],
+      paper: profile.papers || [], patent: profile.patents || [], certificate: profile.certificates || []
+    };
+    const addLabels = {education: '添加教育经历', work: '添加工作/实习经历',
+      project: '添加参与科研项目', award: '添加学习/工作获奖情况', family: '添加家庭成员及重要社会关系', paper: '添加发表文章、著作情况', patent: '添加专利', certificate: '添加证书'};
+    const forms = kind => [...document.querySelectorAll('.ux-standard-form')].filter(f => beisenKind(f) === kind);
+    for (const [kind, entries] of Object.entries(lists)) {
+      while (forms(kind).length && forms(kind).length < entries.length) {
+        const button = [...document.querySelectorAll('span,button')].find(el =>
+          el.textContent.trim().replace(/\*$/, '') === addLabels[kind] && isElementTrulyVisible(el));
+        if (!button) break;
+        const count = forms(kind).length;
+        button.click();
+        for (let attempt = 0; attempt < 10 && forms(kind).length === count; attempt++) await sleep(100);
+        if (forms(kind).length === count) break;
+      }
+    }
+    let filledCount = 0;
+    const manualFields = [];
+    const indices = {};
+    const join = (...values) => values.filter(Boolean).join('\n');
+    for (const form of document.querySelectorAll('.ux-standard-form')) {
+      const kind = beisenKind(form);
+      const index = indices[kind] || 0;
+      indices[kind] = index + 1;
+      const entry = lists[kind]?.[index] || {};
+      const basic = profile.basicInfo || {};
+      const maps = {
+        basic: {'姓名': basic.fullName, '电子邮箱': basic.email, '移动电话': basic.phone,
+          '民族': basic.ethnicity, '国籍': basic.nationality, '通信地址': basic.address,
+          '是否获得过奖学金': (profile.awards || []).some(a => /奖学金/.test(a.name)) ? '是' : '',
+          '是否为学生干部': (profile.education || []).some(e => /班长|学习委员|学生干部/.test(e.description || '')) ? '是' : ''},
+        education: {'学校': entry.school, '专业名称': entry.major,
+          '学历': ({硕士:'硕士研究生',博士:'博士研究生'})[entry.degree] || entry.degree,
+          '开始时间': entry.startDate, '结束时间': entry.endDate},
+        work: {'单位名称': entry.company, '所在部门': entry.department, '职位名称': entry.position,
+          '用工形式': entry.workType, '工作描述': join(entry.description, entry.achievements),
+          '开始时间': entry.startDate, '结束时间': entry.endDate},
+        project: {'项目名称': entry.name, '担当角色': entry.role,
+          '主要工作内容': join(entry.description, entry.techStack, entry.responsibilities, entry.achievements),
+          '开始时间': entry.startDate, '结束时间': entry.endDate},
+        award: {'奖项名称': entry.name, '获奖级别': entry.level === '校级' ? '院校级' : entry.level, '获奖时间': entry.date, '颁奖单位': entry.issuer},
+        family: {'称谓': entry.relation, '姓名': entry.name, '工作单位': entry.employer, '所属职务': entry.position},
+        skills: {'技能类别': Array.isArray(profile.skills) ? profile.skills.join(', ') : profile.skills?.skills},
+        intro: {'自我评价及求职目标': [profile.commonAnswers?.selfEvaluation, profile.commonAnswers?.careerGoal].filter(Boolean).join('\n') || profile.introTemplates?.default}
+      };
+      for (const item of form.querySelectorAll('.form-item--phoenix')) {
+        const label = item.querySelector('.form-item__title')?.textContent.trim();
+        const value = maps[kind]?.[label];
+        const input = item.querySelector('input:not([type="file"]), textarea, select');
+        if (!value) continue;
+        const radios = [...item.querySelectorAll('.phoenix-radio')];
+        if (radios.length) {
+          if (radios.some(el => el.classList.contains('phoenix-radio--checked'))) continue;
+          const choice = radios.find(el => el.textContent.trim() === value);
+          if (choice) {
+            choice.click();
+            await sleep(100);
+            if (choice.classList.contains('phoenix-radio--checked')) filledCount++;
+          }
+          continue;
+        }
+        if (!input || fieldHasValue(input)) continue;
+        // 本站日期精确到日，只有年月的简历不能擅自补成 1 日。
+        const isDate = /时间|日期|年月/.test(label);
+        const success = isDate ? await fillBeisenDate(input, value) : (input.closest('.phoenix-select')
+          ? await fillBeisenSelect(input, value) : await fillField(input, value));
+        if (success) {
+          filledCount++;
+          input.style.backgroundColor = '#e8f5e9';
+          item.removeAttribute('data-job-autofill-manual');
+        } else {
+          const note = `${label}：${value}（请手动${isDate ? '确认具体日期' : '选择'}）`;
+          item.setAttribute('data-job-autofill-manual', note);
+          let hint = item.querySelector('.job-autofill-manual-hint');
+          if (!hint) {
+            hint = document.createElement('small');
+            hint.className = 'job-autofill-manual-hint';
+            item.appendChild(hint);
+          }
+          hint.textContent = note;
+          hint.style.color = '#a65b00';
+          manualFields.push(note);
+        }
+      }
+    }
+    filledCount += await fillExtendedFields(profile);
+    await handleResumeUpload(profile);
+    showNotification(`已填充 ${filledCount} 个字段；${manualFields.length} 项需手动确认，未知资料请自行补充`, 'warning');
+    return {filledCount, manualFields, results: [], isForm: true};
+  }
+
   async function fillForm(profile) {
+    activeDeclarationQuestions = new Set((profile?.declarations || []).map(item => exactQuestion(item.question)).filter(Boolean));
+    if (profile) await fillConfirmedDeclarations(profile);
+    if (profile && isBeisenForm()) return fillBeisenForm(profile);
+    if (profile && isXhsForm()) return fillXhsForm(profile);
     if (!profile) {
       console.log('[Capybara助手] 未找到激活的资料');
       return { filledCount: 0, isChat: false };
@@ -1190,6 +1523,7 @@
     // 必须在写入“工作经历/担任职位”等输入框之前保存目标岗位，
     // 否则填充完成后的页面值可能被误识别为本次投递岗位。
     cacheJobMetaFromPage();
+    await ensureMokaEntries(profile);
 
     // 2. 扫描所有可填充的网申输入框
     const inputs = document.querySelectorAll(
@@ -1215,6 +1549,7 @@
     const hasSeparateProjResp = matchedTypes.includes('projectResponsibilities');
     const hasSeparateProjAchieve = matchedTypes.includes('projectAchievements');
     const hasSeparateTechStack = matchedTypes.includes('techStack');
+    const hasSeparateWorkAchieve = matchedTypes.includes('workAchievements');
 
     // 多段经历智能计数追踪
     let currentProjIdx = 0;
@@ -1361,6 +1696,10 @@
           valueToFill = profile.jobIntention?.expectedPosition;
           break;
         case 'expectedSalary':
+          if (/年薪|月薪/.test(getClosestLabelText(input)) && (!profile.jobIntention?.salaryPeriod || !getClosestLabelText(input).includes(profile.jobIntention.salaryPeriod) || !profile.jobIntention.salaryUnit)) {
+            if (profile.jobIntention?.expectedSalary) markManual(input, `${profile.jobIntention.expectedSalary}（请确认薪资周期和单位）`);
+            break;
+          }
           valueToFill = profile.jobIntention?.expectedSalary;
           break;
         case 'availableDate':
@@ -1475,6 +1814,10 @@
         case 'major':
           valueToFill = edu.major;
           break;
+        case 'academicDegree': valueToFill = edu.academicDegree; break;
+        case 'secondMajor': valueToFill = edu.secondMajor; break;
+        case 'sourcePlace': valueToFill = profile.basicInfo?.sourcePlace; break;
+        case 'registeredAddress': valueToFill = profile.basicInfo?.registeredAddress; break;
         case 'degree':
           valueToFill = edu.degree;
           break;
@@ -1492,6 +1835,9 @@
           break;
         case 'courses':
           valueToFill = edu.courses;
+          break;
+        case 'educationDescription':
+          valueToFill = edu.description;
           break;
         case 'eduStartDate':
           if (isSelect) {
@@ -1543,7 +1889,7 @@
           valueToFill = work.workType;
           break;
         case 'workDescription':
-          valueToFill = smartWork.description;
+          valueToFill = [smartWork.description, !hasSeparateWorkAchieve && smartWork.achievements].filter(Boolean).join('\n');
           break;
         case 'workAchievements':
           valueToFill = smartWork.achievements;
@@ -1561,6 +1907,10 @@
           break;
         case 'projectUrl':
           valueToFill = proj.projectUrl;
+          break;
+        case 'portfolioLinks':
+          valueToFill = [...new Set([profile.basicInfo?.github, profile.basicInfo?.website,
+            ...(profile.projects || []).map(p => p.projectUrl)].filter(Boolean))].join('\n');
           break;
         case 'projectStartDate':
           if (isSelect) {
@@ -1587,12 +1937,12 @@
           valueToFill = smartProj.achievements || proj.achievements;
           break;
         case 'projectDescription':
-          // 若页面有独立的项目职责/技术栈输入框，此处仅填入项目背景与概述；否则填入完整描述
-          if (hasSeparateProjResp) {
-            valueToFill = smartProj.description;
-          } else {
-            valueToFill = proj.description || [smartProj.description, smartProj.responsibilities, smartProj.achievements].filter(Boolean).join('\n');
-          }
+          valueToFill = [
+            smartProj.description,
+            !hasSeparateTechStack && smartProj.techStack && `技术栈：${smartProj.techStack}`,
+            !hasSeparateProjResp && smartProj.responsibilities,
+            !hasSeparateProjAchieve && smartProj.achievements && `项目成果：${smartProj.achievements}`
+          ].filter(Boolean).join('\n');
           break;
 
         // 技能
@@ -1627,6 +1977,7 @@
     filledCount += await fillYearMonthWidgets(profile);
 
     // 2. 处理简历文件上传
+    filledCount += await fillExtendedFields(profile);
     await handleResumeUpload(profile);
 
     console.log(`[Capybara助手] 填充完成: ${filledCount} 个字段`);
@@ -1661,9 +2012,13 @@
     }
 
     // 显示通知
-    showNotification(`已自动填充 ${filledCount} 个字段 · 投递历史已记录`, 'success');
+    const manualFields = [...new Set([...document.querySelectorAll('[data-job-autofill-manual]')]
+      .map(el => el.getAttribute('data-job-autofill-manual')))];
+    showNotification(`已自动填充 ${filledCount} 个字段` +
+      (manualFields.length ? ` · 请手动选择：${manualFields.join('、')}` : ' · 投递历史已记录'),
+      manualFields.length ? 'warning' : 'success');
 
-    return { filledCount, results };
+    return { filledCount, results, manualFields };
   }
 
   const JOB_TITLE_HINT = /工程师|开发|算法|产品|运营|设计|测试|管培|专员|经理|助理|分析师|研究员|架构师|实习|前端|后端|全栈|数据|策划|美术|原画|安全|运维|大模型|\bAI\b|游戏|客户端|服务端|量化|策略|增长|投放|审核|编辑|翻译|法务|财务|人力|HR|研发|技术|软件|硬件|嵌入式|芯片|通信|网络|自动化|机械|电气|材料|工艺|销售|商务|BD|市场|公关|客服|风控|会计|审计|采购|物流|供应链|行政|文员|顾问|教研|教师|导师|主管|总监|负责人|Leader|应届生|储备干部|管培生/;
@@ -2056,6 +2411,88 @@
     return classifySectionTitle(best);
   }
 
+  function isMokaForm() {
+    return location.hostname === 'app.mokahr.com' && /^\/campus-recruitment\/37\//.test(location.pathname) && !!document.querySelector('[data-nav-id="block-educationInfo"]');
+  }
+
+  async function fillMokaSelect(el, value) {
+    const wrap = el.closest('[class*="sd-Dropdown-container-"]');
+    if (!wrap) return false;
+    el.scrollIntoView({ block: 'center' });
+    el.click();
+    const findOption = () => [...wrap.querySelectorAll('[class*="sd-Select-menu-"] [class*="sd-Menu-container-"]')]
+      .filter(option => isElementTrulyVisible(option) && !/disabled/i.test(option.className))
+      .find(option => optionTextEquals(option.querySelector('[class*="sd-Menu-content-item-"]')?.firstElementChild?.textContent || option.textContent, value));
+    await sleep(120);
+    let option = findOption();
+    if (!option && !el.readOnly) {
+      nativeSet(el, HTMLInputElement.prototype, value);
+      dispatchInputEvents(el, value);
+      for (let i = 0; i < 15 && !option; i++) {
+        await sleep(100);
+        option = findOption();
+      }
+    }
+    if (option) (option.querySelector('[class*="sd-Menu-container-"]') || option).click();
+    else document.body.click();
+    el.blur();
+    await sleep(100);
+    const selected = wrap.querySelector('[class*="sd-Input-display-value-"]')?.textContent || '';
+    const success = optionTextEquals(selected, value);
+    if (success) el.removeAttribute('data-job-autofill-manual');
+    else el.setAttribute('data-job-autofill-manual', getClosestLabelText(el) || el.placeholder || '下拉框');
+    return success;
+  }
+
+  function mokaExperienceGroups(profile) {
+    return [
+      ['educationInfo', (profile.education || []).filter(e => e.school || e.major)],
+      ['practiceInfo', (profile.workExperience || []).filter(e => e.company || e.position)],
+      ['projectInfo', (profile.projects || []).filter(e => e.name)]
+    ];
+  }
+
+  async function ensureMokaEntries(profile) {
+    if (!isMokaForm()) return;
+    for (const [key, items] of mokaExperienceGroups(profile)) {
+      const block = document.querySelector(`[data-nav-id="block-${key}"]`);
+      if (!block) continue;
+      const rows = () => [...block.children].filter(e => e.matches('[class*="apply-fields-"]'));
+      while (rows().length < items.length) {
+        const add = [...block.querySelectorAll('button')].find(b => b.textContent.trim() === '添加');
+        if (!add || add.disabled) break;
+        const count = rows().length;
+        add.scrollIntoView({ block: 'center' });
+        add.click();
+        for (let i = 0; i < 15 && rows().length === count; i++) await sleep(100);
+        if (rows().length === count) break;
+      }
+    }
+  }
+
+  async function fillMokaDates(profile) {
+    let count = 0;
+    async function fillDateControls(container, dates) {
+      const controls = [...container.querySelectorAll('.month-range-select input[type="text"]')];
+      // Moka 选择年份时会自动补成 1 月；只保护本轮开始前已有的值。
+      const hadValues = controls.map(fieldHasValue);
+      const values = dates.flatMap(date => { const d = parseYearMonth(date); return [d.year, d.month]; });
+      for (let i = 0; i < controls.length; i++) {
+        if (values[i] && !hadValues[i] && await fillField(controls[i], values[i])) count++;
+      }
+    }
+    for (const [key, items] of mokaExperienceGroups(profile)) {
+      const rows = document.querySelectorAll(`[data-nav-id="block-${key}"] > [class*="apply-fields-"]`);
+      for (let i = 0; i < Math.min(rows.length, items.length); i++) {
+        await fillDateControls(rows[i], [items[i].startDate, items[i].endDate]);
+      }
+    }
+    const graduation = [...document.querySelectorAll('[class*="apply-field-"]')]
+      .find(e => e.querySelector('[class^="title-"]')?.textContent.trim() === '毕业时间');
+    if (graduation) await fillDateControls(graduation, [profile.basicInfo?.graduationDate]);
+    return count;
+  }
+
   function isYearControl(el) {
     if (el.tagName === 'SELECT') {
       const years = [...el.options].filter((o) => /^(19|20)\d{2}/.test((o.value || o.text).trim()));
@@ -2084,6 +2521,7 @@
   }
 
   async function fillYearMonthWidgets(profile) {
+    if (isMokaForm()) return fillMokaDates(profile);
     const controls = [...document.querySelectorAll(
       'select, [role="combobox"], input[placeholder="年"], input[placeholder="月"], input[placeholder="年份"], input[placeholder="月份"]'
     )].filter((el) => {
@@ -2148,43 +2586,233 @@
     return filled;
   }
 
-  // 处理简历上传
-  async function handleResumeUpload(profile) {
-    if (!profile.resumeFile) return;
+  let activeDeclarationQuestions = new Set();
+  function isProtectedQuestion(label) {
+    if (activeDeclarationQuestions.has(exactQuestion(label))) return true;
+    return /亲属.*(任职|退休|工作)|境外.*(身份|居留|就业|定居)|外国公民|香港.*台湾|国（境）外|国籍.*(其他|外国)|违法|违纪|犯罪|处分|失信|利益冲突|声明|承诺|签名|签字|本人确认|本人同意|真实性/.test(label);
+  }
 
-    // 查找简历上传输入框
-    const fileInputs = document.querySelectorAll('input[type="file"]');
+  function markManual(input, value) {
+    input.setAttribute('data-job-autofill-manual', value);
+    input.title = `请手动确认：${value}`;
+    const root = input.closest('.form-item--phoenix, .ant-form-item, [class*="apply-field-"], .form-group') || input.parentElement;
+    let note = root.querySelector('.job-autofill-manual-hint');
+    if (!note) { note = document.createElement('small'); note.className = 'job-autofill-manual-hint'; root.append(note); }
+    note.textContent = `请手动确认：${value}`;
+    note.style.color = '#a65b00';
+  }
 
-    for (const input of fileInputs) {
-      const fieldType = matchFieldType(input);
-      if (fieldType === 'resume' || getElementFeatures(input).combined.includes('resume') ||
-          getElementFeatures(input).combined.includes('简历') ||
-          getElementFeatures(input).combined.includes('cv')) {
+  function exactQuestion(text) {
+    return String(text || '').replace(/[\s*＊:：?？。]/g, '').toLowerCase();
+  }
 
-        try {
-          // 从base64创建File对象
-          const response = await fetch(profile.resumeFile);
-          const blob = await response.blob();
-          const file = new File([blob], profile.resumeFileName || 'resume.pdf', {
-            type: blob.type || 'application/pdf'
-          });
+  function questionContainer(input) {
+    return input.closest('.form-item--phoenix, .ant-form-item, [class*="apply-field-"], fieldset, .form-group') || input.parentElement;
+  }
 
-          // 创建DataTransfer对象
-          const dataTransfer = new DataTransfer();
-          dataTransfer.items.add(file);
-          input.files = dataTransfer.files;
+  function questionAnswered(root) {
+    return !!root.querySelector('input:checked, .phoenix-radio--checked, .ant-radio-wrapper-checked, [aria-checked="true"]') ||
+      [...root.querySelectorAll('input:not([type=radio]):not([type=checkbox]):not([type=hidden]),textarea,select')].some(fieldHasValue);
+  }
 
-          // 触发change事件
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-
-          console.log('[Capybara助手] 简历上传成功');
-          input.style.backgroundColor = '#e8f5e9';
-          input.style.border = '2px solid #4caf50';
-
-        } catch (e) {
-          console.error('[Capybara助手] 简历上传失败:', e);
-        }
+  async function confirmDeclarations(items) {
+    return new Promise(resolve => {
+      const dialog = document.createElement('dialog');
+      dialog.id = 'job-autofill-declaration-confirm';
+      dialog.style.cssText = 'max-width:640px;max-height:80vh;overflow:auto;padding:24px;border:1px solid #ddd;border-radius:14px;background:white;color:#222;';
+      const title = document.createElement('h3'); title.textContent = '确认本次个人声明'; dialog.append(title);
+      for (const item of items) {
+        const text = document.createElement('p');
+        text.textContent = `当前问题：${item.question}\n保存答案：${item.saved.answer}${item.saved.explanation ? '；' + item.saved.explanation : ''}\n适用企业：${item.saved.company}`;
+        text.style.whiteSpace = 'pre-wrap'; dialog.append(text);
       }
+      for (const [text, result] of [['取消', false], ['确认填写以上答案', true]]) {
+        const button = document.createElement('button'); button.textContent = text; button.style.margin = '8px';
+        button.onclick = () => { dialog.close(); dialog.remove(); resolve(result); }; dialog.append(button);
+      }
+      dialog.addEventListener('cancel', () => { dialog.remove(); resolve(false); });
+      document.body.append(dialog); dialog.showModal();
+    });
+  }
+
+  async function fillConfirmedDeclarations(profile) {
+    if (!(isBeisenForm() || isXhsForm() || isMokaForm())) return;
+    const company = isBeisenForm() ? '中国人寿' : isXhsForm() ? '小红书' : '三七互娱';
+    const items = [], seen = new Set();
+    for (const input of document.querySelectorAll('input,select,textarea')) {
+      if (input.disabled || !isElementTrulyVisible(input)) continue;
+      const root = questionContainer(input);
+      if (seen.has(root)) continue;
+      seen.add(root);
+      const question = getClosestLabelText(input);
+      if (!question || /承诺|签名|签字|本人确认|本人同意|真实性/.test(question) || questionAnswered(root)) continue;
+      const saved = (profile.declarations || []).find(item => exactQuestion(item.question) === exactQuestion(question) &&
+        item.company === company && item.hostname?.toLowerCase() === location.hostname && ['是', '否'].includes(item.answer));
+      if (saved) items.push({ input, root, question, saved });
+    }
+    if (!items.length || !await confirmDeclarations(items)) return;
+    for (const { input, root, question, saved } of items) {
+      if (!input.isConnected || questionAnswered(root) || exactQuestion(getClosestLabelText(input)) !== exactQuestion(question)) continue;
+      const radios = [...root.querySelectorAll('.phoenix-radio, .ant-radio-wrapper, label')];
+      const choice = radios.find(el => el.textContent.trim() === saved.answer && (el.querySelector('input[type=radio]') || el.matches('.phoenix-radio')));
+      let success;
+      if (choice) {
+        choice.click(); await sleep(100);
+        success = questionAnswered(root);
+      } else success = await fillSiteControl(input, saved.answer);
+      if (!success || saved.explanation) markManual(input, `${saved.answer}${saved.explanation ? '；补充说明：' + saved.explanation : ''}`);
+    }
+  }
+
+  async function fillBeisenDate(input, value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    input.click();
+    const panel = () => [...document.querySelectorAll('.phoenix-calendar')].find(isElementTrulyVisible);
+    await sleep(100);
+    let picked = false;
+    for (let step = 0; step < 120; step++) {
+      const calendar = panel();
+      if (!calendar) break;
+      const shownYear = parseInt(calendar.querySelector('.phoenix-calendar-year-select')?.textContent, 10);
+      const shownMonth = parseInt(calendar.querySelector('.phoenix-calendar-month-select')?.textContent, 10);
+      if (!shownYear || !shownMonth) break;
+      if (shownYear === year && shownMonth === month) {
+        const cell = [...calendar.querySelectorAll('.phoenix-calendar-cell:not(.phoenix-calendar-last-month-cell):not(.phoenix-calendar-next-month-btn-day) .phoenix-calendar-date')]
+          .find(el => Number(el.textContent) === day && el.getAttribute('aria-disabled') !== 'true');
+        if (cell) { cell.click(); picked = true; }
+        break;
+      }
+      const direction = shownYear !== year ? (shownYear > year ? 'prev-year' : 'next-year') : (shownMonth > month ? 'prev-month' : 'next-month');
+      const button = calendar.querySelector(`.phoenix-calendar-${direction}-btn`);
+      if (!button) break;
+      button.click(); await sleep(45);
+    }
+    document.body.click(); input.blur(); await sleep(80);
+    const displayed = input.closest('.phoenix-select')?.querySelector('.phoenix-select__tipEle')?.textContent.trim() || input.value;
+    return picked && displayed?.replace(/\//g, '-') === value;
+  }
+
+  async function fillSiteControl(input, value) {
+    if (input.closest('.ant-form-item') && isXhsForm()) return fillXhsControl(input, value);
+    if (isBeisenForm() && /^\d{4}-\d{2}(?:-\d{2})?$/.test(String(value)) && /日期|时间|年月/.test(getClosestLabelText(input))) return fillBeisenDate(input, value);
+    if (input.closest('.phoenix-select') && isBeisenForm()) return fillBeisenSelect(input, value);
+    const datePicker = input.closest('.phoenix-datePicker, .phoenix-datepicker, [class*="date-picker"], [class*="datePicker"]');
+    if (datePicker) return false; // 未知日期组件不能把文本写入当成控件提交。
+    return fillField(input, value);
+  }
+
+  // 只按当前条目容器取值；无条目容器时不猜测第几段经历。
+  function extendedEntry(input, profile) {
+    const phoenix = input.closest('.ux-standard-form');
+    if (phoenix && isBeisenForm()) {
+      const kind = beisenKind(phoenix);
+      const section = { education: 'education', work: 'workExperience', project: 'projects', award: 'awards', family: 'familyMembers', paper: 'papers', patent: 'patents', certificate: 'certificates' }[kind];
+      const index = [...document.querySelectorAll('.ux-standard-form')].filter(form => beisenKind(form) === kind).indexOf(phoenix);
+      return { section, entry: profile[section]?.[index] };
+    }
+    if (isXhsForm()) {
+      const card = input.closest('.rounded-md');
+      const anchors = { '论文名称': 'papers', '竞赛/奖项名称': 'awards', '专利名称': 'patents', '证书名称': 'certificates' };
+      const anchor = Object.keys(anchors).find(name => [...(card?.querySelectorAll('.ant-form-item-label') || [])].some(label => label.textContent.trim() === name));
+      if (anchor) {
+        const cards = [...document.querySelectorAll('.rounded-md')].filter(row => [...row.querySelectorAll('.ant-form-item-label')].some(label => label.textContent.trim() === anchor));
+        const section = anchors[anchor];
+        return { section, entry: profile[section]?.[cards.indexOf(card)] };
+      }
+      const match = input.id.match(/(resumeEducationInfo|resumeEmploymentInfo)_(\d+)_/);
+      if (match) { const section = {resumeEducationInfo:'education',resumeEmploymentInfo:'workExperience',resumeAwardInfo:'awards',resumePaperInfo:'papers',resumePatentInfo:'patents'}[match[1]]; return { section, entry: profile[section]?.[Number(match[2])] }; }
+    }
+    if (isMokaForm()) {
+      const block = input.closest('[data-nav-id]');
+      const section = { 'block-educationInfo': 'education', 'block-projectInfo': 'projects', 'block-familyInfo': 'familyMembers', 'block-awardInfo': 'awards', 'block-paperInfo': 'papers', 'block-patentInfo': 'patents' }[block?.dataset.navId];
+      const row = input.closest('[class*="apply-fields-"]');
+      if (section && row) return { section, entry: profile[section]?.[[...block.children].filter(child => child.matches('[class*="apply-fields-"]')).indexOf(row)] };
+    }
+    const row = input.closest('[data-profile-section][data-entry-index]');
+    if (row) return { section: row.dataset.profileSection, entry: profile[row.dataset.profileSection]?.[Number(row.dataset.entryIndex)] };
+    return {};
+  }
+
+  async function fillExtendedFields(profile) {
+    if (!(isBeisenForm() || isXhsForm() || isMokaForm() || ['localhost', '127.0.0.1'].includes(location.hostname))) return 0;
+    const mappings = {
+      education: { '学位':'academicDegree', '第二专业':'secondMajor', '辅修专业':'secondMajor', '学校所在城市':'schoolCity', '导师':'advisor', '实验室':'laboratory', '研究方向':'researchArea', '是否全日制':'fullTime', '全日制':'fullTime', '是否最高全日制学历':'highestFullTime', '最高全日制学历':'highestFullTime', '主修状态':'majorStatus', '是否主修':'majorStatus' },
+      projects: { '项目级别':'projectLevel', '项目类型':'projectType' },
+      awards: { '颁奖单位':'issuer', '名次':'rank', '获奖名次':'rank', '说明':'description', '获奖说明':'description', '其他补充':'description', '链接':'url', '担当角色':'role', '获奖时间':'date', '获奖日期':'date' },
+      familyMembers: { '出生日期':'birthDate', '出生年月':'birthDate' },
+      papers: { '论文名称':'name', '文章名、书名':'name', '名称':'name', '发表日期':'date', '发表时间':'date', '日期':'date', '期刊/会议或出版社':'publisher', '期刊名称':'publisher', '出版社':'publisher', '发布渠道':'publisher', '刊物、出版社':'publisher', '作者顺序':'authorOrder', '担当角色':'role', '摘要':'abstract', '论文摘要':'abstract', '内容摘要':'abstract', '担任角色':'role', '链接':'url' },
+      patents: { '专利名称':'name', '名称':'name', '专利人':'inventor', '取得日期':'date', '获得时间':'date', '说明':'description', '链接':'url' },
+      certificates: { '证书名称':'name', '证书编号':'code', '颁发机构':'issuer', '取得日期':'date', '有效期至':'expiryDate', '获得时间':'date' }
+    };
+    const basic = { '国籍':'nationality', '生源地':'sourcePlace', '生源地(高考时户口所在地)':'sourcePlace', '户籍地':'registeredAddress', '户籍所在地':'registeredAddress', '入党团时间':'politicalJoinDate', '加入党派时间':'politicalJoinDate', '身高':'height', '身高(cm)':'height', '身高（cm）':'height', '体重':'weight', '体重(公斤)':'weight', '体重（kg）':'weight', '健康状况':'health' };
+    const job = { '是否服从调剂':'acceptAdjustment', '是否接受县级公司工作':'acceptCounty', '是否愿意去县级公司工作':'acceptCounty', '币种':'salaryCurrency', '薪资币种':'salaryCurrency', '金额单位':'salaryUnit', '薪资周期':'salaryPeriod' };
+    const answers = { '游戏经历':'gameExperience', '编程语言':'programmingLanguages', '请列出你最擅长的3门编程语言，并按熟悉程度从高到低排序。':'programmingLanguages', 'ai工具使用经历':'aiTools', 'ai 工具使用经历':'aiTools', '爱好特长':'hobbies', '爱好及特长':'hobbies', '优势不足':'strengthsWeaknesses', '优势与不足':'strengthsWeaknesses', '自我评价':'selfEvaluation', '求职目标':'careerGoal' };
+    let count = 0;
+    for (const input of document.querySelectorAll('input:not([type=file]):not([type=hidden]):not([type=checkbox]),textarea,select')) {
+      if (isIgnoredInput(input) || !isElementTrulyVisible(input) || fieldHasValue(input)) continue;
+      const label = getClosestLabelText(input);
+      if (!label || isProtectedQuestion(label)) continue;
+      const { section, entry } = extendedEntry(input, profile);
+      let value = section ? entry?.[mappings[section]?.[label]] : profile.basicInfo?.[basic[label]] || profile.jobIntention?.[job[label]] || profile.commonAnswers?.[answers[label]];
+      if (!value && !section) value = (profile.customAnswers || []).find(item => exactQuestion(item.question) === exactQuestion(label) && !isProtectedQuestion(item.question))?.answer;
+      if (section === 'awards' && label === '获奖情况描述/链接') value = [entry?.description, entry?.url].filter(Boolean).join('\n');
+      if (section === 'patents' && label === '专利描述/链接') value = [entry?.description, entry?.url].filter(Boolean).join('\n');
+      if (!section && label === '自我评价及求职目标') value = [profile.commonAnswers?.selfEvaluation, profile.commonAnswers?.careerGoal].filter(Boolean).join('\n') || profile.introTemplates?.default;
+      if (!section && label === '期望待遇（万元/年）') {
+        const salary = profile.jobIntention || {};
+        if (salary.expectedSalary && (!/^(人民币|CNY|RMB)$/.test(salary.salaryCurrency) || salary.salaryUnit !== '万元' || salary.salaryPeriod !== '年薪')) {
+          markManual(input, `${salary.expectedSalary}（请确认币种、万元单位和年薪周期）`); continue;
+        }
+        value = salary.expectedSalary;
+      }
+      if (Array.isArray(value)) value = value.join('\n');
+      if (!value) continue;
+      if (/日期|时间/.test(label) && /^\d{4}-\d{2}$/.test(value) && (isBeisenForm() || input.type === 'date')) {
+        markManual(input, `${value}（请确认具体日期）`); continue;
+      }
+      if (await fillSiteControl(input, value)) count++;
+      else markManual(input, value);
+    }
+    return count;
+  }
+
+  // 附件仅按明确用途选择，设置 input.files 不代表网站已接收。
+  async function handleResumeUpload(profile) {
+    for (const input of document.querySelectorAll('input[type="file"]')) {
+      if (input.disabled || input.files?.length || input.dataset.capybaraFileSelected) continue;
+      const label = getClosestLabelText(input);
+      const kinds = [
+        ['resume', /简历附件|附件简历|上传简历|^简历$|\bresume\b|\bcv\b/i],
+        ['idPhoto', /证件照|标准照/], ['lifePhoto', /生活照/], ['works', /作品附件|上传作品|作品集附件/]
+      ].filter(([, pattern]) => pattern.test(label));
+      if (kinds.length !== 1) continue;
+      const kind = kinds[0][0];
+      const refs = kind === 'works' ? profile.attachments?.works || [] : [profile.attachments?.[kind]].filter(Boolean);
+      try {
+        const candidates = [];
+        for (const ref of refs) {
+          const response = await runtimeSend({ action: 'getAttachment', profileId: profile.id, id: ref.id });
+          if (!response?.success) throw new Error(response?.error || '附件读取失败');
+          candidates.push(response.file);
+        }
+        if (kind === 'resume' && !candidates.length && profile.resumeFile) candidates.push({ name: profile.resumeFileName || 'resume.pdf', dataUrl: profile.resumeFile });
+        const transfer = new DataTransfer();
+        for (const candidate of candidates) {
+          const blob = await (await fetch(candidate.dataUrl)).blob();
+          const file = new File([blob], candidate.name, { type: blob.type });
+          const accepted = input.accept.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (/Photo$/.test(kind) && !file.type.startsWith('image/')) continue;
+          if (accepted.length && !accepted.some(type => type === file.type || (type.startsWith('.') && file.name.toLowerCase().endsWith(type)) || (type.endsWith('/*') && file.type.startsWith(type.slice(0, -1))))) continue;
+          transfer.items.add(file);
+          if (!input.multiple) break;
+        }
+        if (!transfer.files.length) continue;
+        input.files = transfer.files;
+        input.dataset.capybaraFileSelected = 'true';
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        markManual(input, '已选择附件，请核对网站是否接收；重新上传请在网站手动操作');
+      } catch (error) { markManual(input, error.message); }
     }
   }
 
@@ -2213,7 +2841,12 @@
   }
 
   function fieldHasValue(el) {
+    if (el.type === 'radio' || el.type === 'checkbox') return !!questionContainer(el).querySelector('input:checked, [aria-checked="true"], .phoenix-radio--checked, .ant-radio-wrapper-checked');
+    const phoenix = el.closest('.phoenix-select');
+    if (phoenix) return !!phoenix.querySelector('.phoenix-select__tipEle')?.textContent.trim();
     if (el.isContentEditable) return !!(el.textContent || '').trim();
+    const mokaSelect = el.closest('[class*="sd-Select-container-"]');
+    if (mokaSelect) return !!mokaSelect.querySelector('[class*="sd-Input-display-value-"]')?.textContent.trim();
     if (el.tagName === 'SELECT') {
       const option = el.options[el.selectedIndex];
       return !!option && !!el.value && !/^(请选择.*|请选择|please\s+select.*|select(?:\s.*)?|年|月|日|[-—]+)$/i.test(option.text.trim());
@@ -2229,6 +2862,8 @@
   }
 
   function isOpenQuestionField(el) {
+    if (isProtectedQuestion(getClosestLabelText(el)) || /是否|国籍|身份|籍贯|生源|户籍|婚姻|政治|健康|家庭|亲属|薪资|调剂|县级|意愿|偏好|游戏经历|编程语言|爱好|特长/.test(getClosestLabelText(el))) return false;
+    if (isBeisenForm() || isXhsForm()) return false; // 此类表单包含个人声明；仅使用资料的确定性分区映射。
     if (isSelectWidget(el) || isYearControl(el) || isMonthControl(el)) return false;
     if (el.closest('.ant-select, .el-select, .rc-select')) return false;
     const type = matchFieldType(el);
@@ -2496,7 +3131,7 @@
       degree: profile.education?.[0]?.degree,
       skills: profile.skills?.skills || profile.skills,
       advantage: profile.skills?.advantage,
-      intro: profile.skills?.intro,
+      intro: profile.introTemplates?.default || profile.skills?.intro,
       projects: (profile.projects || []).slice(0, 3).map((p) => ({
         name: p.name,
         role: p.role,
@@ -2668,6 +3303,7 @@
       const compName = detectCompanyName();
       const resumeContext = JSON.stringify(slimResumeContext(profile));
       let aiFilledCount = 0;
+      let manualAnswerCount = 0;
 
       for (let i = 0; i < candidates.length; i++) {
         const fieldRef = candidates[i];
@@ -2682,6 +3318,13 @@
         }
 
         const structuredContext = resolveStructuredResumeContext(profile, fieldRef, promptField);
+        // 游戏体验和个人熟练度排序需要本人确认，不能由项目经历推断。
+        if (/游戏经历|游戏时长|氪金|编程语言.*(排序|熟悉程度)|最擅长.*编程语言/.test(labelText)) {
+          manualAnswerCount++;
+          promptField?.classList.remove('job-autofill-ai-focusing');
+          if (typeof appLog !== 'undefined') appLog.info('content', 'ai.step_skip', `请本人填写: ${labelText}`);
+          continue;
+        }
         if (structuredContext.required && !structuredContext.item) {
           promptField?.classList.remove('job-autofill-ai-focusing');
           if (typeof appLog !== 'undefined') {
@@ -2759,6 +3402,7 @@
 
         const userPrompt =
           `【任务】填写网申开放题\n` +
+          '【资料不足】若简历没有题目要求的事实（如游戏经历、语言熟练度排序），只返回 [[NEEDS_USER_INPUT]]。不得把未提及写成“没有”，不得推断个人偏好或编造时长。能部分回答的题目只写已知事实。\n' +
           `【应聘岗位】${compName} - ${posName}\n` +
           `【题目】${labelText}\n` +
           (fieldRef.placeholder ? `【提示】${fieldRef.placeholder}\n` : '') +
@@ -2782,6 +3426,11 @@
           const aiRes = await askAi(userPrompt, systemPrompt, 500);
           if (aiRes && aiRes.success && aiRes.text) {
             const answer = aiRes.text.trim().replace(/^```[\s\S]*?\n|```$/g, '').trim();
+            if (answer.includes('[[NEEDS_USER_INPUT]]')) {
+              manualAnswerCount++;
+              if (typeof appLog !== 'undefined') appLog.info('content', 'ai.step_skip', `资料不足，待本人补充: ${labelText}`);
+              continue;
+            }
             if (answer) {
               const qualityCheck = checkAnswerQuality(answer, fieldRef.fieldType, labelText);
               const writeResult = await writeAndVerifyAiAnswer(fieldRef, answer);
@@ -2832,7 +3481,8 @@
         try { recordPageSubmission(profile); } catch {}
       }
 
-      showNotification(`AI 助填完成：开放题 ${aiFilledCount} 项，基础字段 ${fastFillRes.filledCount} 项`, 'success');
+      showNotification(`AI 助填完成：开放题 ${aiFilledCount} 项，基础字段 ${fastFillRes.filledCount} 项` +
+        (manualAnswerCount ? `；${manualAnswerCount} 项资料不足，请本人填写` : ''), manualAnswerCount ? 'warning' : 'success');
       if (typeof appLog !== 'undefined') {
         appLog.success('content', 'ai.step_fill_done', `逐步解析完成，共解答 ${aiFilledCount} 项`, { url: location.href });
       }
@@ -2850,12 +3500,12 @@
   const FIELD_LABELS = {
     fullName: '姓名', firstName: '名', lastName: '姓', middleName: '中间名',
     phone: '手机号码', phoneType: '手机类型', email: '电子邮箱', gender: '性别', birthDate: '出生日期', idCard: '身份证号',
-    politicalStatus: '政治面貌', ethnicity: '民族', hometown: '籍贯/生源地', graduationDate: '毕业时间', maritalStatus: '婚姻状况', currentCity: '现居住城市',
+    politicalStatus: '政治面貌', ethnicity: '民族', hometown: '籍贯', graduationDate: '毕业时间', maritalStatus: '婚姻状况', currentCity: '现居住城市',
     emergencyContact: '紧急联系人', emergencyRelation: '联系人关系', emergencyPhone: '联系人电话',
     expectedCity: '期望城市', expectedPosition: '期望岗位', expectedSalary: '期望薪资', availableDate: '到岗时间', referralCode: '内推码', recruitSource: '招聘渠道', willingToTravel: '是否可出差',
     cet4: '英语四级', cet6: '英语六级', ielts: '雅思成绩', toefl: '托福成绩', otherLanguages: '其他外语', awards: '荣誉奖项', certificates: '资格证书', certificateCode: '证书编号', certificateIssuer: '颁发机构', certificateDate: '取得日期', certificateExpiryDate: '有效期至',
     familyName: '家庭成员姓名', familyRelation: '亲属关系', familyEmployer: '家庭成员工作单位', familyPosition: '家庭成员职务', familyPhone: '家庭成员电话',
-    school: '毕业院校', college: '所属学院', major: '专业名称', degree: '学历学位', degreeType: '培养方式', schoolType: '院校层次', gpa: 'GPA绩点', rank: '成绩排名', courses: '主修课程', eduStartDate: '入学时间', eduEndDate: '毕业时间',
+    school: '毕业院校', college: '所属学院', major: '专业名称', degree: '学历', degreeType: '培养方式', schoolType: '院校层次', gpa: 'GPA绩点', rank: '成绩排名', courses: '主修课程', eduStartDate: '入学时间', eduEndDate: '毕业时间',
     company: '公司名称', position: '担任职位', department: '所属部门', workCity: '工作城市', workStartDate: '入职时间', workEndDate: '离职时间', workDescription: '工作内容', workAchievements: '工作成果',
     projectName: '项目名称', projectRole: '项目角色', projectStartDate: '项目开始', projectEndDate: '项目结束', projectResponsibilities: '项目中职责', projectAchievements: '项目成果', techStack: '技术栈', projectDescription: '项目描述', projectUrl: '项目链接',
     skills: '专业技能', advantage: '个人优势', intro: '自我介绍',
@@ -3208,7 +3858,7 @@
       pushCopyRow(items, '出生日期', b.birthDate);
       pushCopyRow(items, '政治面貌', b.politicalStatus);
       pushCopyRow(items, '民族', b.ethnicity);
-      pushCopyRow(items, '籍贯/生源地', b.hometown);
+      pushCopyRow(items, '籍贯', b.hometown);
       pushCopyRow(items, '现居住城市', b.currentCity || b.location || b.city);
       pushCopyRow(items, '婚姻状况', b.maritalStatus);
       pushCopyRow(items, '毕业时间', b.graduationDate);
@@ -3824,8 +4474,12 @@
           return fillForm(response.profile).then((res) => {
             if (res && res.isChat) {
               showNotification('✅ 已将 HR 打招呼语自动填入沟通框，可核对发送！', 'success');
+            } else if (res?.manualFields?.length) {
+              showNotification(`已填充 ${res.filledCount} 个字段；${res.manualFields.length} 项需手动确认，请查看字段旁的提示`, 'warning');
             } else if (res && res.filledCount > 0) {
               showNotification(`✅ 已成功自动填充 ${res.filledCount} 个网申字段！`, 'success');
+            } else if (res?.isForm) {
+              showNotification('本轮没有新增填充；已填内容保持不变，缺少的资料请手动补充', 'info');
             } else {
               showNotification('💡 当前处于职位浏览/搜索页，未检测到网申表单。请点击职位「立即沟通」打开聊天框，或进入招聘详情网申页后再点击填充。', 'info');
             }

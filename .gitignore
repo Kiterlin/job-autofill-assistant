@@ -1,5 +1,8 @@
 参考项目/
-.claude/
+.claude/*
+!.claude/skills/
+!.claude/skills/playwright-skill
+node_modules/
 .DS_Store
 Thumbs.db
 *.bak
