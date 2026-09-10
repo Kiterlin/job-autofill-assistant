@@ -1,7 +1,10 @@
 参考项目/
-.claude/*
-!.claude/skills/
-!.claude/skills/playwright-skill
+.agent/
+.agents/
+.claude/
+.grok/
+AGENTS.md
+CLAUDE.md
 node_modules/
 .DS_Store
 Thumbs.db
